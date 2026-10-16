@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.25)
+project(BrowserComponentConsumer LANGUAGES CXX)
+find_package(HolonightFileBrowser CONFIG REQUIRED COMPONENTS ${COMPONENT})
+add_executable(consumer main.cpp)
+target_link_libraries(consumer PRIVATE HolonightFileBrowser::${COMPONENT})
+target_compile_definitions(consumer PRIVATE COMPONENT_${COMPONENT})

@@ -1,0 +1,147 @@
+cmake_minimum_required(VERSION 3.25)
+project(holonight-file-browser VERSION 0.1.0 LANGUAGES CXX)
+# Installed QML providers follow the standard CMake prefix search path.
+set(_qml_prefixes ${CMAKE_PREFIX_PATH})
+if(DEFINED ENV{CMAKE_PREFIX_PATH})
+  string(REPLACE ":" ";" _prefix_environment "$ENV{CMAKE_PREFIX_PATH}")
+  list(APPEND _qml_prefixes ${_prefix_environment})
+endif()
+foreach(_prefix IN LISTS _qml_prefixes)
+  if(IS_DIRECTORY "${_prefix}/lib/qt6/qml")
+    list(APPEND QML_IMPORT_PATH "${_prefix}/lib/qt6/qml")
+  endif()
+endforeach()
+if(DEFINED ENV{QML_IMPORT_PATH})
+  string(REPLACE ":" ";" _qml_environment "$ENV{QML_IMPORT_PATH}")
+  list(APPEND QML_IMPORT_PATH ${_qml_environment})
+endif()
+list(REMOVE_DUPLICATES QML_IMPORT_PATH)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(GNUInstallDirs)
+
+option(BUILD_TESTING "Build provider regressions and installed consumers" OFF)
+option(BUILD_FILE_BROWSER_QUICK "Build passive Qt Quick browsing" ON)
+option(BUILD_FILE_BROWSER_SEARCH "Build folder and recursive search" ON)
+option(BUILD_FILE_BROWSER_STORAGE "Build storage browsing" ON)
+option(BUILD_FILE_BROWSER_PREVIEW "Build image and text preview services" ON)
+option(BUILD_FILE_BROWSER_PREVIEW_QUICK "Build thumbnail provider and passive previews" ON)
+option(BUILD_FILE_BROWSER_MARKDOWN "Build restricted Markdown presentation" ON)
+find_package(Qt6 6.11 REQUIRED COMPONENTS Core)
+qt_standard_project_setup(REQUIRES 6.11)
+function(browser_install_metatypes target)
+  get_target_property(json ${target} INTERFACE_QT_META_TYPES_BUILD_FILE)
+  if(json)
+    get_filename_component(name "${json}" NAME)
+    install(FILES "${json}" DESTINATION ${CMAKE_INSTALL_LIBDIR}/metatypes)
+    target_sources(${target} INTERFACE
+      "$<INSTALL_INTERFACE:$<$<BOOL:$<TARGET_PROPERTY:QT_CONSUMES_METATYPES>>:$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/metatypes/${name}>>")
+  endif()
+endfunction()
+include(components.cmake)
+
+function(browser_component component folder)
+  string(TOLOWER "${component}" suffix)
+  set(target holonight_file_browser_${suffix})
+  if(component STREQUAL "PreviewQuick")
+    add_library(${target} SHARED ${ARGN})
+  else()
+    add_library(${target} STATIC ${ARGN})
+  endif()
+  add_library(HolonightFileBrowser::${component} ALIAS ${target})
+  set_target_properties(${target} PROPERTIES EXPORT_NAME ${component} POSITION_INDEPENDENT_CODE ON)
+  target_link_libraries(${target} PUBLIC HolonightFileBrowser::Core)
+  qt_extract_metatypes(${target})
+  browser_install_metatypes(${target})
+  install(TARGETS ${target} EXPORT HolonightFileBrowser${component}Targets ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(DIRECTORY include/HolonightFileBrowser/${folder} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/HolonightFileBrowser)
+  install(EXPORT HolonightFileBrowser${component}Targets NAMESPACE HolonightFileBrowser::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HolonightFileBrowser)
+endfunction()
+if(BUILD_FILE_BROWSER_SEARCH)
+  find_package(HolonightSearch CONFIG REQUIRED)
+  browser_component(Search search
+    src/search/folder_search.cpp src/search/path_scanner.cpp src/search/path_index_store.cpp src/search/path_finder_model.cpp
+    src/search/search_exclusion_policy.cpp src/search/fuzzy_matcher.cpp
+    include/HolonightFileBrowser/search/path_finder_model.h)
+  target_link_libraries(holonight_file_browser_search PUBLIC HolonightSearch::Search)
+endif()
+if(BUILD_FILE_BROWSER_STORAGE)
+  find_package(HoloNightSystemServices CONFIG REQUIRED COMPONENTS Storage)
+  browser_component(Storage storage src/storage/devices_model.cpp src/storage/capacity_probe.cpp
+    include/HolonightFileBrowser/storage/devices_model.h)
+  target_link_libraries(holonight_file_browser_storage PUBLIC HoloNightSystem::Storage)
+endif()
+if(BUILD_FILE_BROWSER_PREVIEW)
+  find_package(Qt6 6.11 REQUIRED COMPONENTS Gui Svg)
+  find_package(HolonightImages CONFIG REQUIRED)
+  find_package(HolonightThumbnails CONFIG REQUIRED)
+  browser_component(Preview preview
+    src/preview/exif_reader.cpp src/preview/preview_service.cpp src/preview/text_line_model.cpp
+    src/preview/text_lines.cpp src/preview/text_preview_service.cpp src/preview/thumbnail_service.cpp
+    src/preview/thumbnail_cache.cpp src/preview/thumbnail_decoder.cpp src/preview/svg_helper.cpp
+    include/HolonightFileBrowser/preview/preview_service.h include/HolonightFileBrowser/preview/text_line_model.h)
+  target_link_libraries(holonight_file_browser_preview PUBLIC Qt6::Gui HolonightImages::Images HolonightThumbnails::Thumbnails PRIVATE Qt6::Svg)
+endif()
+if(BUILD_FILE_BROWSER_PREVIEW_QUICK)
+  if(NOT BUILD_FILE_BROWSER_PREVIEW OR NOT BUILD_FILE_BROWSER_QUICK)
+    message(FATAL_ERROR "PreviewQuick requires Preview and Quick")
+  endif()
+  browser_component(PreviewQuick preview_quick src/preview_quick/thumbnail_provider.cpp
+    src/preview_quick/preview_image_item.cpp
+    include/HolonightFileBrowser/preview_quick/thumbnail_provider.h
+    include/HolonightFileBrowser/preview_quick/preview_image_item.h)
+  target_include_directories(holonight_file_browser_previewquick PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/HolonightFileBrowser/preview_quick)
+  target_link_libraries(holonight_file_browser_previewquick PUBLIC HolonightFileBrowser::Preview HolonightFileBrowser::Quick)
+  set_source_files_properties(qml/TextPreview.qml PROPERTIES QT_RESOURCE_ALIAS TextPreview.qml)
+  qt_add_qml_module(holonight_file_browser_previewquick URI Holonight.FileBrowser.Preview VERSION 1.0
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Preview
+    RESOURCE_PREFIX /qt/qml IMPORT_PATH ${QML_IMPORT_PATH}
+    DEPENDENCIES QtQuick Holonight.Core QML_FILES qml/TextPreview.qml)
+  install(TARGETS holonight_file_browser_previewquickplugin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser/Preview)
+  install(FILES qml/TextPreview.qml
+    ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Preview/qmldir
+    ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Preview/holonight_file_browser_previewquick.qmltypes
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser/Preview)
+endif()
+if(BUILD_FILE_BROWSER_MARKDOWN)
+  if(NOT BUILD_FILE_BROWSER_PREVIEW_QUICK)
+    message(FATAL_ERROR "Markdown requires PreviewQuick")
+  endif()
+  find_package(QMarkdown 1.1 CONFIG REQUIRED)
+  qt_add_library(holonight_file_browser_markdown SHARED)
+  add_library(HolonightFileBrowser::Markdown ALIAS holonight_file_browser_markdown)
+  set_target_properties(holonight_file_browser_markdown PROPERTIES EXPORT_NAME Markdown)
+  target_link_libraries(holonight_file_browser_markdown PUBLIC HolonightFileBrowser::PreviewQuick QMarkdown::QMarkdown)
+  list(APPEND QML_IMPORT_PATH "${QMarkdown_QML_IMPORT_PATH}")
+  set_source_files_properties(qml/MarkdownDocument.qml PROPERTIES QT_RESOURCE_ALIAS MarkdownDocument.qml)
+  qt_add_qml_module(holonight_file_browser_markdown URI Holonight.FileBrowser.Markdown VERSION 1.0
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Markdown
+    RESOURCE_PREFIX /qt/qml IMPORT_PATH ${QML_IMPORT_PATH}
+    DEPENDENCIES QtQuick QMarkdown Holonight.Core QML_FILES qml/MarkdownDocument.qml)
+  install(TARGETS holonight_file_browser_markdown EXPORT HolonightFileBrowserMarkdownTargets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(EXPORT HolonightFileBrowserMarkdownTargets NAMESPACE HolonightFileBrowser:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HolonightFileBrowser)
+  install(TARGETS holonight_file_browser_markdownplugin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser/Markdown)
+  install(FILES qml/MarkdownDocument.qml
+    ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Markdown/qmldir
+    ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Markdown/holonight_file_browser_markdown.qmltypes
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser/Markdown)
+endif()
+if(BUILD_TESTING)
+  enable_testing()
+  find_package(Qt6 6.11 REQUIRED COMPONENTS Test)
+  find_package(GTest 1.14 CONFIG REQUIRED)
+  add_subdirectory(tests)
+endif()
+install(FILES LICENSE LICENSES/GPL-3.0-or-later.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/${PROJECT_NAME})
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_custom_target(format COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/format-sources.py")
+add_custom_target(format-check COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/format-sources.py" --check)
+add_custom_target(qml-lint)
+foreach(_target holonight_file_browser_quick holonight_file_browser_previewquick holonight_file_browser_markdown)
+  if(TARGET ${_target}_qmllint)
+    add_dependencies(qml-lint ${_target}_qmllint)
+  endif()
+endforeach()

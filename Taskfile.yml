@@ -1,0 +1,19 @@
+version: '3'
+tasks:
+  build:
+    cmds:
+    - cmake --preset dev
+    - cmake --build --preset dev
+  test:
+    cmds:
+    - task: build
+    - ctest --preset dev {{.CLI_ARGS}}
+  format:
+    cmds:
+    - python3 scripts/ci/container.py format
+  check:
+    cmds:
+    - python3 scripts/ci/container.py check {{.CLI_ARGS}}
+  check:integration:
+    cmds:
+    - python3 scripts/ci/container.py integration {{.CLI_ARGS}}
