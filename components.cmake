@@ -1,5 +1,6 @@
 include(CMakePackageConfigHelpers)
 add_library(holonight_file_browser_core STATIC
+  src/breadcrumb_adapter.cpp include/HolonightFileBrowser/breadcrumb_adapter.h
   src/natural_order.cpp src/directory_scan.cpp src/directory_reader.cpp src/directory_proxy_model.cpp
   src/places/place_availability_checker.cpp src/places/place_list.cpp src/places/user_dirs_parser.cpp src/icon_name_resolver.cpp
   include/HolonightFileBrowser/directory_reader.h include/HolonightFileBrowser/directory_proxy_model.h)
@@ -29,13 +30,16 @@ if(BUILD_FILE_BROWSER_QUICK)
   set_source_files_properties(qml/DirectoryListing.qml PROPERTIES QT_RESOURCE_ALIAS DirectoryListing.qml)
   set_source_files_properties(qml/DirectoryGrid.qml PROPERTIES QT_RESOURCE_ALIAS DirectoryGrid.qml)
   set_source_files_properties(qml/PlacesListing.qml PROPERTIES QT_RESOURCE_ALIAS PlacesListing.qml)
+  set_source_files_properties(qml/DetailedColumnLayout.qml PROPERTIES QT_RESOURCE_ALIAS DetailedColumnLayout.qml)
+  set_source_files_properties(qml/DetailedListHeader.qml PROPERTIES QT_RESOURCE_ALIAS DetailedListHeader.qml)
+  set_source_files_properties(qml/DetailedListRow.qml PROPERTIES QT_RESOURCE_ALIAS DetailedListRow.qml)
   qt_add_qml_module(holonight_file_browser_quick
     URI Holonight.FileBrowser VERSION 1.0
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser
     RESOURCE_PREFIX /qt/qml
     IMPORT_PATH ${QML_IMPORT_PATH}
     DEPENDENCIES QtQuick Holonight.Core Holonight.Controls
-    QML_FILES qml/PlacesListing.qml qml/DirectoryGrid.qml qml/DirectoryListing.qml SOURCES qml/registrations.h src/quick.cpp src/icon_image_provider.cpp)
+    QML_FILES qml/DetailedColumnLayout.qml qml/DetailedListHeader.qml qml/DetailedListRow.qml qml/PlacesListing.qml qml/DirectoryGrid.qml qml/DirectoryListing.qml SOURCES qml/registrations.h src/quick.cpp src/icon_image_provider.cpp)
   target_include_directories(holonight_file_browser_quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/qml")
   target_link_libraries(holonight_file_browser_quick PUBLIC holonight_file_browser_core Qt6::Quick
     PRIVATE Qt6::QuickControls2 HolonightQt::Core HolonightQt::Controls)
@@ -49,7 +53,7 @@ if(BUILD_FILE_BROWSER_QUICK)
     ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/qmldir
     ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/holonight_file_browser_quick.qmltypes
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser)
-  install(FILES qml/PlacesListing.qml qml/DirectoryGrid.qml qml/DirectoryListing.qml DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser)
+  install(FILES qml/DetailedColumnLayout.qml qml/DetailedListHeader.qml qml/DetailedListRow.qml qml/PlacesListing.qml qml/DirectoryGrid.qml qml/DirectoryListing.qml DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser)
   install(EXPORT HolonightFileBrowserQuickTargets NAMESPACE HolonightFileBrowser::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HolonightFileBrowser)
 endif()

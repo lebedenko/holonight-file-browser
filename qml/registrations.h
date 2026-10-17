@@ -15,3 +15,10 @@ struct BrowserProxyRegistration {
   QML_FOREIGN(DirectoryProxyModel)
   QML_NAMED_ELEMENT(DirectorySortModel)
 };
+
+#include <HolonightFileBrowser/breadcrumb_adapter.h>
+struct BreadcrumbAdapterRegistration {
+  Q_GADGET
+  QML_FOREIGN(HolonightFileBrowser::BreadcrumbAdapter)
+  QML_NAMED_ELEMENT(BreadcrumbAdapter)
+};

@@ -95,13 +95,14 @@ if(BUILD_FILE_BROWSER_PREVIEW_QUICK)
     include/HolonightFileBrowser/preview_quick/preview_image_item.h)
   target_include_directories(holonight_file_browser_previewquick PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/HolonightFileBrowser/preview_quick)
   target_link_libraries(holonight_file_browser_previewquick PUBLIC HolonightFileBrowser::Preview HolonightFileBrowser::Quick)
+  set_source_files_properties(qml/FilePreview.qml PROPERTIES QT_RESOURCE_ALIAS FilePreview.qml)
   set_source_files_properties(qml/TextPreview.qml PROPERTIES QT_RESOURCE_ALIAS TextPreview.qml)
   qt_add_qml_module(holonight_file_browser_previewquick URI Holonight.FileBrowser.Preview VERSION 1.0
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Preview
     RESOURCE_PREFIX /qt/qml IMPORT_PATH ${QML_IMPORT_PATH}
-    DEPENDENCIES QtQuick Holonight.Core QML_FILES qml/TextPreview.qml)
+    DEPENDENCIES QtQuick Holonight.Core Holonight.Controls QML_FILES qml/FilePreview.qml qml/TextPreview.qml)
   install(TARGETS holonight_file_browser_previewquickplugin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser/Preview)
-  install(FILES qml/TextPreview.qml
+  install(FILES qml/FilePreview.qml qml/TextPreview.qml
     ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Preview/qmldir
     ${CMAKE_CURRENT_BINARY_DIR}/qml/Holonight/FileBrowser/Preview/holonight_file_browser_previewquick.qmltypes
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/qt6/qml/Holonight/FileBrowser/Preview)

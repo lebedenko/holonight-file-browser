@@ -4,6 +4,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <HolonightFileBrowser/breadcrumb_adapter.h>
 #include <HolonightFileBrowser/directory_reader.h>
 #include <HolonightFileBrowser/directory_scan.h>
 #include <HolonightFileBrowser/grid_navigation.h>
@@ -85,4 +86,22 @@ TEST(DirectoryRefresh, FailedRefreshPreservesTheLastKnownRows) {
   ASSERT_TRUE(QTest::qWaitFor([&] { return !reader.scanning(); }));
   EXPECT_FALSE(reader.directoryError().isEmpty());
   EXPECT_EQ(reader.rowCount(), count);
+}
+
+TEST(BreadcrumbAdapter, KeepsUndecodableNativeAncestorsIndependentOfDisplayLabels) {
+  HolonightFileBrowser::BreadcrumbAdapter adapter;
+  const QByteArray first = QByteArray("/same/") + static_cast<char>(0xff);
+  const QByteArray second = QByteArray("/same/") + static_cast<char>(0xfe);
+  adapter.setPath(first);
+  const auto labels = adapter.labels();
+  EXPECT_EQ(adapter.nativePathAt(0), QByteArray("/"));
+  EXPECT_EQ(adapter.nativePathAt(1), QByteArray("/same"));
+  EXPECT_EQ(adapter.nativePathAt(2), first);
+  adapter.setPath(second);
+  EXPECT_EQ(adapter.labels(), labels);
+  EXPECT_EQ(adapter.nativePathAt(2), second);
+  EXPECT_TRUE(adapter.nativePathAt(-1).isEmpty());
+  EXPECT_TRUE(adapter.nativePathAt(3).isEmpty());
+  adapter.setPath("relative");
+  EXPECT_TRUE(adapter.labels().isEmpty());
 }

@@ -19,3 +19,11 @@ accepts current sibling checkouts before publication. All installation tests sta
 build directories; system installation belongs to the umbrella.
 
 See [design and API ownership](docs/sdd/shared-file-selection/DESIGN.md).
+
+`Holonight.FileBrowser` also exports `DetailedColumnLayout`, `DetailedListHeader`
+and `DetailedListRow`. Give the header and rows the same column-layout object;
+consumers retain sorting, selection, navigation and editing. `BreadcrumbAdapter`
+keeps display labels separate from native ancestor identities. The optional
+`Holonight.FileBrowser.Preview` import exports `FilePreview`, a scrollable image/icon
+and metadata composition driven by a caller-owned `PreviewService`.
+See the [presentation interfaces and migration design](docs/sdd/shared-file-ui-controls/README.md).

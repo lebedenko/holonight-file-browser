@@ -23,7 +23,9 @@ int main(int argc, char** argv) {
 #ifdef COMPONENT_Markdown
   component.setData("import Holonight.FileBrowser.Markdown; MarkdownDocument { markdown: \"hello\" }", {});
 #else
-  component.setData("import Holonight.FileBrowser.Preview; TextPreview {}", {});
+  component.setData(
+      "import QtQuick; import Holonight.FileBrowser.Preview; Item { TextPreview {} FilePreview { service: null } }",
+      {});
 #endif
   auto* object = component.create();
   if (!object) {
