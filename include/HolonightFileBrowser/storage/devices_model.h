@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QTimer>
 #include <QVariantMap>
+#include <QtTypes>
 
 #include <HolonightFileBrowser/storage/capacity_probe.h>
 #include <StorageController.h>
@@ -55,7 +56,7 @@ class DevicesModel : public QAbstractListModel {
   // Mirrors HoloNight::System::StorageOperation value for value, which QML cannot name.
   // Qt model roles/QML properties require implicit integer conversion.
   // NOLINTNEXTLINE(cppcoreguidelines-use-enum-class)
-  enum Verb : std::int8_t { NoVerb = -1, Mount, Unmount, Eject, PowerOff };
+  enum Verb : qint8 { NoVerb = -1, Mount, Unmount, Eject, PowerOff };
   Q_ENUM(Verb)
 
   [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;

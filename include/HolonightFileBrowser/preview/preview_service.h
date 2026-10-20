@@ -8,6 +8,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
+#include <QtTypes>
 
 #include <HolonightFileBrowser/native_path.h>
 #include <HolonightFileBrowser/preview/exif_reader.h>
@@ -34,7 +35,7 @@ class PreviewService : public QObject {
  public:
   // QML uses explicit enum scopes, e.g. PreviewService.PreviewErrorKind.None.
   // Scoped-only registration keeps identically named members in different enums distinct.
-  enum class PreviewErrorKind : std::uint8_t {
+  enum class PreviewErrorKind : quint8 {
     None,
     PermissionDenied,
     BrokenSymlink,
@@ -46,10 +47,10 @@ class PreviewService : public QObject {
   };
   Q_ENUM(PreviewErrorKind)
 
-  enum class PreviewConsumer : std::uint8_t { Pane, QuickLook };
+  enum class PreviewConsumer : quint8 { Pane, QuickLook };
   Q_ENUM(PreviewConsumer)
 
-  enum class QuickLookEligibility : std::uint8_t { Checking, Supported, Unsupported };
+  enum class QuickLookEligibility : quint8 { Checking, Supported, Unsupported };
   Q_ENUM(QuickLookEligibility)
 
   struct PreviewError {
