@@ -18,7 +18,7 @@ TEST(NativePath, RoundTripsUndecodableNamesAndReservedUriBytes) {
   EXPECT_TRUE(localUrl("relative").isEmpty());
   EXPECT_TRUE(nativePath(QUrl("https://example.com/a")).isEmpty());
   EXPECT_TRUE(nativePath(QUrl("file:///tmp/%00a")).isEmpty());
-  EXPECT_NE(entryIdentity(path), entryIdentity(path, true));
+  EXPECT_EQ(entryIdentity(path), QByteArray("entry:") + path);
 }
 TEST(Selection, ReconcilesIdentityAcrossReorderingFilteringAndRemoval) {
   Selection state;

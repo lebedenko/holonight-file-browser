@@ -33,11 +33,6 @@ void DirectoryProxyModel::setSortDescending(bool descending) {
 // Qt's descending mode reverses whatever lessThan() decides, including the directories-first
 // grouping below; REQ-F-003 only mandates dirs-first "by default" (ascending), so this is accepted.
 bool DirectoryProxyModel::lessThan(const QModelIndex& left, const QModelIndex& right) const {
-  const bool leftIsParent = sourceModel()->data(left, DirectoryRoles::IsParentRole).toBool();
-  const bool rightIsParent = sourceModel()->data(right, DirectoryRoles::IsParentRole).toBool();
-  if (leftIsParent != rightIsParent) {
-    return leftIsParent ? (sort_order_ == Qt::AscendingOrder) : (sort_order_ == Qt::DescendingOrder);
-  }
   const bool leftIsDir = sourceModel()->data(left, DirectoryRoles::IsDirRole).toBool();
   const bool rightIsDir = sourceModel()->data(right, DirectoryRoles::IsDirRole).toBool();
   if (leftIsDir != rightIsDir) {
@@ -58,9 +53,6 @@ int DirectoryProxyModel::compareNames(const QString& left, const QString& right)
 }
 bool DirectoryProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const {
   const auto sourceIndex = sourceModel()->index(sourceRow, 0, sourceParent);
-  if (sourceModel()->data(sourceIndex, DirectoryRoles::IsParentRole).toBool()) {
-    return true;
-  }
   if (hidden_visible_) {
     return true;
   }

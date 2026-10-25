@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
   QTimer::singleShot(5000, &loop, &QEventLoop::quit);
   reader.load(dir.path());
   loop.exec();
-  if (reader.scanning() || !reader.directoryError().isEmpty() || sorted.rowCount() != 2) {
+  if (reader.scanning() || !reader.directoryError().isEmpty() || sorted.rowCount() != 1) {
     return 3;
   }
 #ifdef QUICK_CONSUMER
@@ -120,7 +120,7 @@ Item {
     return 5;
   }
   view->setProperty("model", QVariant::fromValue(&sorted));
-  view->setProperty("currentIndex", 1);
+  view->setProperty("currentIndex", 0);
   QQuickWindow window;
   window.resize(320, 200);
   view->setParentItem(window.contentItem());
@@ -129,7 +129,7 @@ Item {
   if (view->property("selectedPaths").toStringList() != QStringList{"/explicit"}) {
     return 6;
   }
-  if (view->property("count").toInt() != 2) {
+  if (view->property("count").toInt() != 1) {
     return 7;
   }
   view->setParentItem(nullptr);

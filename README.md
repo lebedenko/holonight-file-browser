@@ -27,3 +27,11 @@ keeps display labels separate from native ancestor identities. The optional
 `Holonight.FileBrowser.Preview` import exports `FilePreview`, a scrollable image/icon
 and metadata composition driven by a caller-owned `PreviewService`.
 See the [presentation interfaces and migration design](docs/sdd/shared-file-ui-controls/README.md).
+
+Directory listings contain actual children only, including hidden entries before filtering.
+Empty directories have zero rows. The scanner skips `.` and `..` and never reads parent
+metadata or synthesizes navigation rows. Consumers own parent navigation through their
+commands and toolbar controls. `entryIdentity()` preserves the `entry:` prefix and native
+path bytes. The former parent field, role and synthetic-entry helper are removed;
+remaining role numbers are unchanged. Rebuild Files, Viewer and the portal together
+against the updated installed provider; this API removal has no compatibility shim.

@@ -43,8 +43,8 @@ TEST(FileBrowser, MetadataSortingHiddenAndUnicode) {
   ASSERT_TRUE(QTest::qWaitFor([&] { return !reader.scanning(); }));
   EXPECT_TRUE(reader.directoryError().isEmpty());
   const auto listing = names(sorted);
-  EXPECT_EQ(listing.first(), "..");
-  EXPECT_EQ(listing.at(1), "folder");
+  EXPECT_FALSE(listing.contains(".."));
+  EXPECT_EQ(listing.first(), "folder");
   EXPECT_LT(listing.indexOf("file2.txt"), listing.indexOf("file10.txt"));
   EXPECT_FALSE(listing.contains(".hidden"));
   EXPECT_TRUE(listing.contains(QString::fromUtf8("caf\xc3\xa9 #%?.txt")));
@@ -70,16 +70,15 @@ TEST(FileBrowser, NativePathsSurviveNonUtf8FolderAndFilename) {
   EXPECT_TRUE(finished);
   EXPECT_TRUE(reader.directoryError().isEmpty());
   EXPECT_EQ(reader.nativeDirectoryPath(), nativeFolder);
-  EXPECT_EQ(reader.rowCount(), 2);
-  const auto file = reader.index(1, 0);
+  EXPECT_EQ(reader.rowCount(), 1);
+  const auto file = reader.index(0, 0);
   EXPECT_EQ(file.data(DirectoryRoles::NativePathRole).toByteArray(), nativeFile);
   EXPECT_FALSE(file.data(DirectoryRoles::StatFailedRole).toBool());
-  EXPECT_EQ(reader.index(0, 0).data(DirectoryRoles::NativePathRole).toByteArray(), QFile::encodeName(dir.path()));
   // Qt's text-path cleanup cannot be relied on to round-trip these fixture names.
   EXPECT_EQ(::unlink(nativeFile.constData()), 0);
   EXPECT_EQ(::rmdir(nativeFolder.constData()), 0);
 }
-TEST(FileBrowser, ParentRowKeepsTargetMetadataThroughASymlinkParent) {
+TEST(FileBrowser, NoParentEntriesInSymlinkedLocationsRefreshOrRoot) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
   ASSERT_TRUE(QDir(dir.path()).mkpath("real/child"));
@@ -87,11 +86,13 @@ TEST(FileBrowser, ParentRowKeepsTargetMetadataThroughASymlinkParent) {
   DirectoryReader reader;
   reader.load(dir.filePath("alias/child"));
   ASSERT_TRUE(QTest::qWaitFor([&] { return !reader.scanning(); }));
-  const auto parent = reader.index(0, 0);
-  EXPECT_EQ(parent.data(DirectoryRoles::NameRole).toString(), "..");
-  EXPECT_TRUE(parent.data(DirectoryRoles::IsDirRole).toBool());
-  EXPECT_FALSE(parent.data(DirectoryRoles::IsSymlinkRole).toBool());
-  EXPECT_EQ(parent.data(DirectoryRoles::NativePathRole).toByteArray(), QFile::encodeName(dir.filePath("alias")));
+  EXPECT_EQ(reader.rowCount(), 0);
+  reader.refresh();
+  ASSERT_TRUE(QTest::qWaitFor([&] { return !reader.scanning(); }));
+  EXPECT_EQ(reader.rowCount(), 0);
+  reader.load("/");
+  ASSERT_TRUE(QTest::qWaitFor([&] { return !reader.scanning(); }));
+  EXPECT_FALSE(names(reader).contains(".."));
 }
 TEST(FileBrowser, NewLoadRejectsOldBatches) {
   QTemporaryDir oldDir;
@@ -107,7 +108,7 @@ TEST(FileBrowser, NewLoadRejectsOldBatches) {
   // A second generation is established before any queued GUI deliveries can run.
   reader.load(newDir.path());
   ASSERT_TRUE(QTest::qWaitFor([&] { return !reader.scanning(); }));
-  EXPECT_EQ(names(reader), (QStringList{"..", "new.txt"}));
+  EXPECT_EQ(names(reader), (QStringList{"new.txt"}));
   EXPECT_EQ(reader.directoryPath(), newDir.path());
 }
 TEST(FileBrowser, MissingAndRelativeLocationsReportErrorAndRecover) {
@@ -124,7 +125,7 @@ TEST(FileBrowser, MissingAndRelativeLocationsReportErrorAndRecover) {
   reader.load(dir.path());
   ASSERT_TRUE(QTest::qWaitFor([&] { return !reader.scanning(); }));
   EXPECT_TRUE(reader.directoryError().isEmpty());
-  EXPECT_EQ(names(reader), (QStringList{".."}));
+  EXPECT_EQ(names(reader), (QStringList{}));
 }
 TEST(FileBrowser, ShutdownDiscardsDeliveriesAndCompletesOnce) {
   QTemporaryDir dir;
@@ -159,7 +160,7 @@ TEST(FileBrowser, ShutdownAfterFirstBatchRejectsPendingRows) {
   });
   ASSERT_TRUE(QTest::qWaitFor([&] { return !finished.isEmpty(); }));
   EXPECT_GT(reader.rowCount(), 0);
-  EXPECT_LT(reader.rowCount(), 801);
+  EXPECT_LT(reader.rowCount(), 800);
   const int retainedRows = reader.rowCount();
   QCoreApplication::processEvents();
   EXPECT_EQ(reader.rowCount(), retainedRows);
@@ -178,7 +179,7 @@ TEST(FileBrowser, ChangedListenerCanReplaceLoadWithoutDuplicateDelivery) {
   });
   reader.load(first.path());
   ASSERT_TRUE(QTest::qWaitFor([&] { return !reader.scanning(); }));
-  EXPECT_EQ(names(reader), (QStringList{"..", "second.txt"}));
+  EXPECT_EQ(names(reader), (QStringList{"second.txt"}));
 }
 TEST(FileBrowser, StandardPlacesDeduplicateAndRetainHomeIcon) {
   QTemporaryDir dir;

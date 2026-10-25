@@ -42,15 +42,13 @@ QVariant DirectoryReader::data(const QModelIndex& index, int role) const {
     case ModeRole:
       return entry.mode;
     case IsHiddenRole:
-      return entry.is_parent ? false : entry.name.startsWith(u'.');
+      return entry.name.startsWith(u'.');
     case StatFailedRole:
       return entry.stat_failed;
     case StatErrorRole:
       return entry.stat_error;
     case IconNameRole:
       return entry.icon_name;
-    case IsParentRole:
-      return entry.is_parent;
     case IsSymlinkRole:
       return entry.is_symlink;
     default:
@@ -59,19 +57,12 @@ QVariant DirectoryReader::data(const QModelIndex& index, int role) const {
 }
 QHash<int, QByteArray> DirectoryReader::roleNames() const {
   return {
-      {NameRole, "name"},
-      {PathRole, "path"},
-      {IsDirRole, "isDir"},
-      {SizeRole, "size"},
-      {ModifiedRole, "modified"},
-      {ModeRole, "mode"},
-      {IsHiddenRole, "isHidden"},
-      {StatFailedRole, "statFailed"},
-      {StatErrorRole, "statError"},
-      {IconNameRole, "iconName"},
-      {IsParentRole, "isParent"},
-      {IsSymlinkRole, "isSymlink"},
-      {NativePathRole, "nativePath"},
+      {NameRole, "name"},           {PathRole, "path"},
+      {IsDirRole, "isDir"},         {SizeRole, "size"},
+      {ModifiedRole, "modified"},   {ModeRole, "mode"},
+      {IsHiddenRole, "isHidden"},   {StatFailedRole, "statFailed"},
+      {StatErrorRole, "statError"}, {IconNameRole, "iconName"},
+      {IsSymlinkRole, "isSymlink"}, {NativePathRole, "nativePath"},
   };
 }
 
@@ -178,10 +169,10 @@ void DirectoryReader::refresh() {
 void DirectoryReader::reconcile(QList<DirectoryEntry> next, bool complete) {
   QHash<QByteArray, DirectoryEntry> byId;
   for (const auto& entry : next) {
-    byId.insert(entryIdentity(entry.native_path, entry.is_parent), entry);
+    byId.insert(entryIdentity(entry.native_path), entry);
   }
   for (int row = static_cast<int>(entries_.size()) - 1; row >= 0; --row) {
-    const auto identity = entryIdentity(entries_[row].native_path, entries_[row].is_parent);
+    const auto identity = entryIdentity(entries_[row].native_path);
     const auto found = byId.constFind(identity);
     if (found == byId.cend()) {
       if (!complete) {
@@ -200,7 +191,7 @@ void DirectoryReader::reconcile(QList<DirectoryEntry> next, bool complete) {
   }
   QList<DirectoryEntry> added;
   for (auto& entry : next) {
-    if (byId.contains(entryIdentity(entry.native_path, entry.is_parent))) {
+    if (byId.contains(entryIdentity(entry.native_path))) {
       added.append(std::move(entry));
     }
   }

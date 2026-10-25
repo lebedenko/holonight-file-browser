@@ -2,7 +2,6 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
-#include <QFileInfo>
 
 #include <HolonightFileBrowser/directory_scan.h>
 #include <HolonightFileBrowser/icon_name_resolver.h>
@@ -65,42 +64,9 @@ DirectoryEntry readEntry(const QString& path, const QString& name, const PlaceLi
   }
   return entry;
 }
-// The ".." row stands for the parent folder itself, so it carries the parent's real metadata; the
-// synthetic row is kept when the parent cannot be stat'ed.
-DirectoryEntry readParentEntry(const QString& path, const PlaceList::IconMap* places, const QByteArray& nativePath) {
-  const auto parentPath = QDir::cleanPath(QFileInfo(path).absolutePath());
-  const auto nativeParent = nativePath.left(qMax<qsizetype>(1, nativePath.lastIndexOf('/')));
-  auto entry = readEntry(parentPath, QStringLiteral("."), nullptr, nativeParent + "/.");
-  if (entry.stat_failed) {
-    return HolonightFileBrowser::syntheticParentEntry(path, places, nativeParent);
-  }
-  entry.name = QStringLiteral("..");
-  entry.native_path = nativeParent;
-  entry.absolute_path = parentPath;
-  entry.is_parent = true;
-  entry.icon_name = IconNameResolver::candidateIconNames(entry.mode, entry.name, namedIconFor(places, parentPath))
-                        .join(IconNameResolver::kChainSeparator);
-  return entry;
-}
-
 }  // namespace
 
 namespace HolonightFileBrowser {
-DirectoryEntry syntheticParentEntry(const QString& path, const PlaceList::IconMap* places,
-                                    const QByteArray& nativeParent) {
-  DirectoryEntry parent;
-  parent.name = QStringLiteral("..");
-  parent.absolute_path = QDir::cleanPath(QFileInfo(path).absolutePath());
-  parent.native_path = nativeParent.isEmpty() ? QFile::encodeName(parent.absolute_path) : nativeParent;
-  parent.is_dir = true;
-  parent.is_parent = true;
-  parent.mode = S_IFDIR | 0755;
-  parent.icon_name =
-      IconNameResolver::candidateIconNames(parent.mode, parent.name, namedIconFor(places, parent.absolute_path))
-          .join(IconNameResolver::kChainSeparator);
-  return parent;
-}
-
 void walkDirectory(const QString& path, const std::shared_ptr<const std::atomic_bool>& cancel,
                    const std::function<void()>& beforeOpen, int readErrorAfter,
                    const std::shared_ptr<const PlaceList::IconMap>& places, const PublishBatch& publish,
@@ -135,9 +101,6 @@ void walkDirectory(const QString& path, const std::shared_ptr<const std::atomic_
     flush(true, QCoreApplication::translate("DirectoryModel", "Cannot open folder: %1")
                     .arg(QString::fromLocal8Bit(std::strerror(error))));
     return;
-  }
-  if (!QDir(path).isRoot()) {
-    buffer.append(readParentEntry(path, places.get(), nativeDirectory));
   }
   int readCount = 0;
   while (!cancel->load()) {

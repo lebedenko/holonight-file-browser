@@ -14,8 +14,6 @@ inline QByteArray nativePath(const QUrl& url) {
   const auto path = QByteArray::fromPercentEncoding(url.path(QUrl::FullyEncoded).toLatin1());
   return absoluteNativePath(path) ? path : QByteArray{};
 }
-// Type prefixes distinguish synthetic entries from real entries with identical native paths.
-inline QByteArray entryIdentity(const QByteArray& path, bool parent = false) {
-  return (parent ? "parent:" : "entry:") + path;
-}
+// Preserve the real-entry identity prefix and authoritative native path bytes.
+inline QByteArray entryIdentity(const QByteArray& path) { return "entry:" + path; }
 }  // namespace HolonightFileBrowser

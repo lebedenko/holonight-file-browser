@@ -33,14 +33,13 @@ ListView {
         required property string name
         required property string path
         required property bool isDir
-        required property bool isParent
         required property string iconName
         required property bool statFailed
         required property string statError
         width: root.width
         highlighted: ListView.isCurrentItem || root.selectedPaths.indexOf(path) >= 0
         title: name
-        subtitle: statFailed ? statError : (isParent ? qsTr("Parent folder") : (isDir ? qsTr("Folder") : ""))
+        subtitle: statFailed ? statError : (isDir ? qsTr("Folder") : "")
         leadingContent: root.iconProvider.length > 0 ? fileIcon : null
         Component {
             id: fileIcon
