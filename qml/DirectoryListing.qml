@@ -15,6 +15,16 @@ ListView {
     signal activationRequested(int row)
     signal selectionToggled(int row)
 
+    // Cursor ownership remains in the consumer. Geometry does not require a delegate
+    // for every row; detailed listings have a uniform row pitch.
+    property real navigationRowHeight: currentItem ? currentItem.height + spacing : HnMetrics.controlHeight(HnControlSize.Normal) + spacing
+    function movementTarget(intent: var): int {
+        return movement.target(currentIndex, intent, count, 1, height, navigationRowHeight);
+    }
+    HnNavigation {
+        id: movement
+    }
+
     clip: true
     Controls.ScrollBar.vertical: Controls.ScrollBar {}
     onCurrentIndexChanged: {
