@@ -43,7 +43,7 @@ Controls.ScrollView {
                     anchors.centerIn: parent
                     size: 64
                     visible: root.service && !root.service.hasImage
-                    source: root.service ? root.iconProvider + root.service.iconName : ""
+                    source: root.service ? root.iconProvider + root.service.iconName + (root.iconProvider === "image://icon/" ? "?revision=" + HnAppearance.revision : "") : ""
                     rendering: HnIcon.Original
                 }
                 HnIcon {
@@ -76,7 +76,7 @@ Controls.ScrollView {
                         objectName: "filePreviewErrorIcon"
                         Layout.alignment: Qt.AlignHCenter
                         size: 64
-                        source: root.service ? root.iconProvider + root.service.iconName : ""
+                        source: root.service ? root.iconProvider + root.service.iconName + (root.iconProvider === "image://icon/" ? "?revision=" + HnAppearance.revision : "") : ""
                         rendering: HnIcon.Original
                         visible: !hasError
                     }

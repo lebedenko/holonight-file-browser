@@ -25,3 +25,19 @@ if(result)
   message(FATAL_ERROR "Installed consumer runtime failed (${result}): ${output}${error}")
 endif()
 message(STATUS "Installed consumer passed (Quick=${QUICK})")
+
+if(QUICK)
+  set(plugin_paths "")
+  foreach(prefix IN LISTS PROVIDER_PREFIX_PATH)
+    list(APPEND plugin_paths "${prefix}/lib/qt6/plugins")
+  endforeach()
+  string(REPLACE ";" ":" plugin_paths "${plugin_paths}")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E env "QT_QPA_PLATFORM=offscreen" "QT_QUICK_BACKEND=software"
+    "QT_QPA_PLATFORMTHEME=holonight" "QT_PLUGIN_PATH=${plugin_paths}" "QT_FORCE_STDERR_LOGGING=1"
+    "QML_IMPORT_PATH=${stage}/lib/qt6/qml:${qml_path}"
+    "LD_LIBRARY_PATH=${stage}/lib:$ENV{LD_LIBRARY_PATH}" "${build}/appearance-consumer"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(result)
+    message(FATAL_ERROR "Live appearance installed consumer failed (${result}): ${output}${error}")
+  endif()
+endif()

@@ -1,7 +1,9 @@
 #include <QIcon>
+#include <QUrlQuery>
 
 #include <HolonightFileBrowser/icon_image_provider.h>
 #include <HolonightFileBrowser/icon_name_resolver.h>
+#include <holonight/icons/hniconengine.h>
 namespace {
 
 // Cost is in pixels; 4096 KiB of ARGB covers thousands of 20 px row icons at 1.5x scale plus the
@@ -17,7 +19,18 @@ QString normalizedChain(const QString& chain) {
 IconImageProvider::IconImageProvider() : QQuickImageProvider(QQuickImageProvider::Pixmap), cache_(kCacheCostLimit) {}
 
 QPixmap IconImageProvider::requestPixmap(const QString& chain, QSize* size, const QSize& requestedSize) {
-  const auto candidates = normalizedChain(chain);
+  const auto queryStart = chain.indexOf('?');
+  const QUrlQuery query(queryStart < 0 ? QString{} : chain.mid(queryStart + 1));
+  QStringList context{query.queryItemValue(QStringLiteral("revision")), QIcon::themeName(), QIcon::fallbackThemeName()};
+  context.append(QIcon::themeSearchPaths());
+  context.append(QStringLiteral("<fallback-paths>"));
+  context.append(QIcon::fallbackSearchPaths());
+  if (context != appearance_context_) {
+    Holonight::HnIconEngine::refreshAppearance();
+    cache_.clear();
+    appearance_context_ = context;
+  }
+  const auto candidates = normalizedChain(queryStart < 0 ? chain : chain.left(queryStart));
   // Qt Quick already multiplies HnIcon's logical sourceSize by the window's effective device pixel
   // ratio, and re-requests when that ratio changes (REQ-F-019), so requestedSize is physical pixels.
   const QSize extent =
@@ -30,7 +43,10 @@ QPixmap IconImageProvider::requestPixmap(const QString& chain, QSize* size, cons
       pixmap = *cached;
     } else {
       ++theme_lookup_count_for_test_;
-      const auto icon = QIcon::fromTheme(name);
+      // Use the shared semantic engine even for colorful SVGs. QIcon's generic SVG
+      // loader does not resolve HoloNight's accent roles. Retain Qt's unthemed fallback.
+      QIcon icon(new Holonight::HnIconEngine(name));
+      if (icon.isNull()) icon = QIcon::fromTheme(name);
       if (!icon.isNull()) {
         // Explicit ratio 1: extent is already physical, and QIcon::pixmap(QSize) would otherwise
         // multiply it by the application-wide ratio a second time.

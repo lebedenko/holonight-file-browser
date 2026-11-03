@@ -23,7 +23,7 @@ install(EXPORT HolonightFileBrowserCoreTargets NAMESPACE HolonightFileBrowser::
 
 if(BUILD_FILE_BROWSER_QUICK)
   find_package(Qt6 6.11 REQUIRED COMPONENTS Gui Quick Qml QuickControls2)
-  find_package(HolonightQt CONFIG REQUIRED)
+  find_package(HolonightQt CONFIG REQUIRED COMPONENTS Icons)
   qt_add_library(holonight_file_browser_quick SHARED)
   add_library(HolonightFileBrowser::Quick ALIAS holonight_file_browser_quick)
   set_target_properties(holonight_file_browser_quick PROPERTIES EXPORT_NAME Quick)
@@ -42,7 +42,7 @@ if(BUILD_FILE_BROWSER_QUICK)
     QML_FILES qml/DetailedColumnLayout.qml qml/DetailedListHeader.qml qml/DetailedListRow.qml qml/PlacesListing.qml qml/DirectoryGrid.qml qml/DirectoryListing.qml SOURCES qml/registrations.h src/quick.cpp src/icon_image_provider.cpp)
   target_include_directories(holonight_file_browser_quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/qml")
   target_link_libraries(holonight_file_browser_quick PUBLIC holonight_file_browser_core Qt6::Quick
-    PRIVATE Qt6::QuickControls2 HolonightQt::Core HolonightQt::Controls)
+    PRIVATE HolonightQt::Icons Qt6::QuickControls2 HolonightQt::Core HolonightQt::Controls)
   install(FILES include/HolonightFileBrowser/quick.h include/HolonightFileBrowser/icon_image_provider.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/HolonightFileBrowser)
   install(TARGETS holonight_file_browser_quick EXPORT HolonightFileBrowserQuickTargets

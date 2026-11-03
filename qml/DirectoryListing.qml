@@ -55,7 +55,7 @@ ListView {
             id: fileIcon
             HnIcon {
                 size: HnMetrics.controlHeight(HnControlSize.Compact)
-                source: root.iconProvider + entry.iconName
+                source: root.iconProvider + entry.iconName + (root.iconProvider === "image://icon/" ? "?revision=" + HnAppearance.revision : "")
                 rendering: HnIcon.Original
             }
         }
