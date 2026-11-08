@@ -25,7 +25,9 @@ class ThumbnailProvider : public QQuickAsyncImageProvider {
  public:
   using Decoder = std::function<ThumbnailResult(const ThumbnailRequest&, const std::atomic_bool&)>;
 
-  explicit ThumbnailProvider(Decoder decoder = decodeThumbnail,
+  explicit ThumbnailProvider(Decoder decoder = {}, int threadCount = thumbnailThreadCount(QThread::idealThreadCount()),
+                             qsizetype cacheEntries = kThumbnailCacheEntries);
+  explicit ThumbnailProvider(HolonightFileBrowser::ImageRuntimeOptions options,
                              int threadCount = thumbnailThreadCount(QThread::idealThreadCount()),
                              qsizetype cacheEntries = kThumbnailCacheEntries);
   ~ThumbnailProvider() override;

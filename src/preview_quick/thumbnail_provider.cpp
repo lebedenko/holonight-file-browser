@@ -169,6 +169,10 @@ class ThumbnailTask : public QObject, public QRunnable {
       return;
     }
     auto result = owner_.decoder_(request_, state_->cancelled);
+    if (result.runtime != HolonightImages::RuntimeStatus::Success &&
+        result.runtime != HolonightImages::RuntimeStatus::Cancelled) {
+      qWarning() << "Thumbnail runtime failure" << static_cast<int>(result.runtime) << result.diagnostic;
+    }
     const bool cancelled = state_->cancelled.load();
     --owner_.pending_;
     if (!cancelled) {
@@ -205,8 +209,22 @@ void ThumbnailResponse::start() {
 
 ThumbnailProvider::ThumbnailProvider(Decoder decoder, int threadCount, qsizetype cacheEntries)
     : decoder_(std::move(decoder)), cache_(cacheEntries) {
+  if (!decoder_) {
+    decoder_ = [options = HolonightFileBrowser::defaultImageRuntimeOptions()](const ThumbnailRequest& request,
+                                                                              const std::atomic_bool& cancelled) {
+      return decodeThumbnail(request, cancelled, options);
+    };
+  }
   pool_.setMaxThreadCount(threadCount);
 }
+
+ThumbnailProvider::ThumbnailProvider(HolonightFileBrowser::ImageRuntimeOptions options, int threadCount,
+                                     qsizetype cacheEntries)
+    : ThumbnailProvider(
+          [options = std::move(options)](const ThumbnailRequest& request, const std::atomic_bool& cancelled) {
+            return decodeThumbnail(request, cancelled, options);
+          },
+          threadCount, cacheEntries) {}
 
 ThumbnailProvider::~ThumbnailProvider() {
   pool_.clear();

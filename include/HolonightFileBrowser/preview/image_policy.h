@@ -5,7 +5,7 @@
 #include <limits>
 // Preserve Files' source memory guard and stored-pixel orientation during migration.
 inline constexpr HolonightImages::Limits kPreviewImageLimits{
-    .inputBytes = std::numeric_limits<qint64>::max(),
+    .inputBytes = 256LL * 1024 * 1024,
     .sourcePixels = (256LL * 1024 * 1024) / 4,
     .sourceExtent = std::numeric_limits<int>::max(),
     .decodedBytes = 256LL * 1024 * 1024,

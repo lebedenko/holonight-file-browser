@@ -6,7 +6,7 @@
 #include <HolonightFileBrowser/preview/image_policy.h>
 #include <HolonightFileBrowser/preview/thumbnail_service.h>
 #include <holonight_images/svg.h>
-#include <holonight_thumbnails/cache.h>
+#include <holonight_thumbnails/isolated.h>
 #include <sys/stat.h>
 
 namespace ThumbnailService {
@@ -57,24 +57,28 @@ HolonightThumbnails::StageCallback cacheStage(const StageCallback& stage) {
 // format plugins with scaled-decode support (JPEG, PNG) avoid allocating a full-resolution bitmap
 // just to downscale it (REQ-NF-003).
 Result decodeBounded(QFile& file, QSize bound, HolonightImages::OrientationPolicy orientation,
-                     const std::atomic_bool& cancelled) {
-  auto result = HolonightImages::decode(
-      file, {.limits = kPreviewImageLimits, .bound = bound, .orientation = orientation}, cancelled);
-  if (cancelled.load()) {
-    return {{}, Outcome::Cancelled};
+                     const std::atomic_bool& cancelled, const ImageRuntimeOptions& options) {
+  auto reply =
+      HolonightImages::IsolatedClient(options.directory)
+          .decode(file, {.limits = kPreviewImageLimits, .bound = bound, .orientation = orientation}, cancelled);
+  if (reply.runtime != HolonightImages::RuntimeStatus::Success) {
+    Result result{{}, Outcome::Cancelled};
+    result.runtime = reply.runtime;
+    result.diagnostic = reply.diagnostic;
+    return result;
   }
-  return {std::move(result.image), result.outcome};
+  return {std::move(reply.result->image), reply.result->outcome};
 }
 
 }  // namespace
 
-Result lookupOrDecode(const QString& path) {
+Result lookupOrDecode(const QString& path, const ImageRuntimeOptions& options) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
     return {{}, Outcome::IoFailure};
   }
   const std::atomic_bool cancelled{false};
-  return lookupOrDecode(file, path, {}, cancelled);
+  return lookupOrDecode(file, path, {}, cancelled, options);
 }
 
 QSize requiredSize(QSizeF source, QSize bound, ImageKind kind) {
@@ -97,16 +101,20 @@ std::optional<Tier> tierForSize(QSize required) {
 
 std::optional<Result> lookup(QFile& file, const QString& path, const QString& revision, Tier selected, QSize required,
                              const std::atomic_bool& cancelled, const StageCallback& stage, ImageKind kind,
-                             const QByteArray& nativePath) {
+                             const QByteArray& nativePath, const ImageRuntimeOptions& options) {
   if (cancelled.load()) {
     return Result{{}, Outcome::Cancelled};
   }
-  auto cached = HolonightThumbnails::lookup(cacheRequest(file, path, revision, required, kind, selected, nativePath),
-                                            cancelled, cacheStage(stage));
-  if (cancelled.load()) {
-    return Result{{}, Outcome::Cancelled};
+  auto cached = HolonightThumbnails::lookupIsolated(
+      cacheRequest(file, path, revision, required, kind, selected, nativePath),
+      HolonightImages::IsolatedClient(options.directory), cancelled, cacheStage(stage));
+  if (cached.runtime != HolonightImages::RuntimeStatus::Success) {
+    Result result{{}, Outcome::Cancelled};
+    result.runtime = cached.runtime;
+    result.diagnostic = cached.diagnostic;
+    return result;
   }
-  return cached ? std::optional<Result>{Result{std::move(*cached), Outcome::Success}} : std::nullopt;
+  return cached.image ? std::optional<Result>{Result{std::move(*cached.image), Outcome::Success}} : std::nullopt;
 }
 
 Result renderSvg(QFile& file, const QString& path, const QString& revision, const QByteArray& bytes, QSize bound,
@@ -142,11 +150,9 @@ Result renderSvg(QFile& file, const QString& path, const QString& revision, cons
 }
 
 Result lookupOrDecode(QFile& file, const QString& path, const QString& revision, Tier tier, QSize required,
-                      const std::atomic_bool& cancelled, const StageCallback& stage, const QByteArray& nativePath) {
-  auto cached = lookup(file, path, revision, tier, required, cancelled, stage, ImageKind::Raster, nativePath);
-  if (cancelled.load()) {
-    return {{}, Outcome::Cancelled};
-  }
+                      const std::atomic_bool& cancelled, const StageCallback& stage, const QByteArray& nativePath,
+                      const ImageRuntimeOptions& options) {
+  auto cached = lookup(file, path, revision, tier, required, cancelled, stage, ImageKind::Raster, nativePath, options);
   if (cached) {
     return *cached;
   }
@@ -154,7 +160,10 @@ Result lookupOrDecode(QFile& file, const QString& path, const QString& revision,
   if (stage) {
     stage(Stage::OriginalDecode);
   }
-  auto decoded = decodeBounded(file, {extent, extent}, HolonightImages::OrientationPolicy::Apply, cancelled);
+  auto decoded = decodeBounded(file, {extent, extent}, HolonightImages::OrientationPolicy::Apply, cancelled, options);
+  if (decoded.runtime != HolonightImages::RuntimeStatus::Success) {
+    return decoded;
+  }
   if (cancelled.load()) {
     return {{}, Outcome::Cancelled};
   }
@@ -175,32 +184,46 @@ Result lookupOrDecode(QFile& file, const QString& path, const QString& revision,
   return cancelled.load() ? Result{{}, Outcome::Cancelled} : decoded;
 }
 
-Result lookupOrDecode(QFile& file, const QString& path, const QString& revision, const std::atomic_bool& cancelled) {
+Result lookupOrDecode(QFile& file, const QString& path, const QString& revision, const std::atomic_bool& cancelled,
+                      const ImageRuntimeOptions& options) {
   if (cancelled.load()) {
     return {{}, Outcome::Cancelled};
   }
-  const auto inspection =
-      HolonightImages::inspect(file, kPreviewImageLimits, cancelled, HolonightImages::OrientationPolicy::Apply, false);
+  const auto reply =
+      HolonightImages::IsolatedClient(options.directory)
+          .inspect(file, kPreviewImageLimits, cancelled, HolonightImages::OrientationPolicy::Apply, false);
+  if (reply.runtime != HolonightImages::RuntimeStatus::Success) {
+    Result result{{}, Outcome::Cancelled};
+    result.runtime = reply.runtime;
+    result.diagnostic = reply.diagnostic;
+    return result;
+  }
+  const auto& inspection = *reply.result;
+  if (inspection.outcome != Outcome::Success) {
+    return {{}, inspection.outcome};
+  }
   if (inspection.outcome == HolonightImages::Outcome::Cancelled || cancelled.load()) {
     return {{}, Outcome::Cancelled};
   }
   const auto source = inspection.orientedSize;
   if (!source.isValid() || source.isEmpty()) {
-    return decodeScaled(file, {128, 128}, cancelled);
+    return decodeScaled(file, {128, 128}, cancelled, {}, options);
   }
-  return lookupOrDecode(file, path, revision, Tier::Normal, requiredSize(source, {128, 128}), cancelled);
+  return lookupOrDecode(file, path, revision, Tier::Normal, requiredSize(source, {128, 128}), cancelled, {}, {},
+                        options);
 }
 
-Result decodeScaled(const QString& path, QSize targetSize) {
+Result decodeScaled(const QString& path, QSize targetSize, const ImageRuntimeOptions& options) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
     return {{}, Outcome::IoFailure};
   }
   const std::atomic_bool cancelled{false};
-  return decodeScaled(file, targetSize, cancelled);
+  return decodeScaled(file, targetSize, cancelled, {}, options);
 }
 
-Result decodeScaled(QFile& file, QSize targetSize, const std::atomic_bool& cancelled, const StageCallback& stage) {
+Result decodeScaled(QFile& file, QSize targetSize, const std::atomic_bool& cancelled, const StageCallback& stage,
+                    const ImageRuntimeOptions& options) {
   if (cancelled.load()) {
     return {{}, Outcome::Cancelled};
   }
@@ -208,7 +231,10 @@ Result decodeScaled(QFile& file, QSize targetSize, const std::atomic_bool& cance
   if (stage) {
     stage(Stage::OriginalDecode);
   }
-  auto image = decodeBounded(file, bound, HolonightImages::OrientationPolicy::Apply, cancelled);
+  auto image = decodeBounded(file, bound, HolonightImages::OrientationPolicy::Apply, cancelled, options);
+  if (image.runtime != HolonightImages::RuntimeStatus::Success) {
+    return image;
+  }
   if (cancelled.load()) {
     return {{}, Outcome::Cancelled};
   }

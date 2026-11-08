@@ -77,13 +77,18 @@ endif()
 if(BUILD_FILE_BROWSER_PREVIEW)
   find_package(Qt6 6.11 REQUIRED COMPONENTS Gui Svg)
   find_package(HolonightImages CONFIG REQUIRED)
-  find_package(HolonightThumbnails CONFIG REQUIRED)
+  find_package(HolonightThumbnails CONFIG REQUIRED COMPONENTS Isolated)
+  if(NOT TARGET HolonightImages::Isolated)
+    message(FATAL_ERROR "Preview requires HolonightImages::Isolated")
+  endif()
+  set(HOLONIGHT_FILE_BROWSER_IMAGE_RUNTIME "${CMAKE_INSTALL_FULL_LIBEXECDIR}/holonight-images/runtime" CACHE PATH "Installed Images runtime directory (never DESTDIR)")
   browser_component(Preview preview
-    src/preview/exif_reader.cpp src/preview/preview_service.cpp src/preview/text_line_model.cpp
+    src/preview/runtime_options.cpp src/preview/exif_reader.cpp src/preview/preview_service.cpp src/preview/text_line_model.cpp
     src/preview/text_lines.cpp src/preview/text_preview_service.cpp src/preview/thumbnail_service.cpp
     src/preview/thumbnail_cache.cpp src/preview/thumbnail_decoder.cpp src/preview/svg_helper.cpp
     include/HolonightFileBrowser/preview/preview_service.h include/HolonightFileBrowser/preview/text_line_model.h)
-  target_link_libraries(holonight_file_browser_preview PUBLIC Qt6::Gui HolonightImages::Images HolonightThumbnails::Thumbnails PRIVATE Qt6::Svg)
+  target_link_libraries(holonight_file_browser_preview PUBLIC Qt6::Gui HolonightImages::Isolated HolonightThumbnails::Isolated PRIVATE Qt6::Svg)
+  target_compile_definitions(holonight_file_browser_preview PRIVATE HOLONIGHT_FILE_BROWSER_IMAGE_RUNTIME="${HOLONIGHT_FILE_BROWSER_IMAGE_RUNTIME}")
 endif()
 if(BUILD_FILE_BROWSER_PREVIEW_QUICK)
   if(NOT BUILD_FILE_BROWSER_PREVIEW OR NOT BUILD_FILE_BROWSER_QUICK)

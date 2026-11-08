@@ -11,12 +11,19 @@
 #include <fcntl.h>
 #include <holonight_images/image.h>
 #include <holonight_images/svg.h>
-#include <holonight_thumbnails/cache.h>
+#include <holonight_thumbnails/isolated.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 
 namespace {
+ThumbnailResult runtimeFailure(HolonightImages::RuntimeStatus status, const QString& diagnostic) {
+  ThumbnailResult result;
+  result.runtime = status;
+  result.diagnostic = diagnostic;
+  result.error = HolonightFileBrowser::imageRuntimeError(status);
+  return result;
+}
 ThumbnailResult failure(QString error) { return {.image = {}, .source_size = {}, .error = std::move(error)}; }
 
 QString outcomeError(HolonightImages::Outcome outcome) {
@@ -27,7 +34,7 @@ QString outcomeError(HolonightImages::Outcome outcome) {
     case Outcome::Cancelled:
       return QStringLiteral("Cancelled");
     case Outcome::Unsupported:
-      return QStringLiteral("The image format is not recognized.");
+      return QStringLiteral("The image format or color profile is not supported.");
     case Outcome::Damaged:
       return QStringLiteral("The image is damaged or could not be decoded.");
     case Outcome::ResourceLimit:
@@ -69,7 +76,7 @@ bool sourceMatches(const QByteArray& path, const struct stat& opened) {
 bool useDiskCache(int boxPixels) { return boxPixels > 0 && boxPixels <= 1024; }
 
 ThumbnailResult decodeSvg(QFile& file, const QByteArray& path, const struct stat& metadata, int boxPixels,
-                          const std::atomic_bool& cancelled) {
+                          const std::atomic_bool& cancelled, const HolonightImages::IsolatedClient& client) {
   const auto source = HolonightImages::loadSvg(file, kSvgFileLimitBytes, cancelled);
   if (source.outcome != HolonightImages::Outcome::Success) {
     return failure(outcomeError(source.outcome));
@@ -96,8 +103,12 @@ ThumbnailResult decodeSvg(QFile& file, const QByteArray& path, const struct stat
       cacheRequest(path, metadata, HolonightImages::svgPixelSize(inspection.facts.documentSize, {boxPixels, boxPixels}),
                    HolonightThumbnails::Kind::Svg);
   if (useDiskCache(boxPixels)) {
-    if (auto hit = HolonightThumbnails::lookup(cache, cancelled)) {
-      return finish(std::move(*hit), sourceSize);
+    auto hit = HolonightThumbnails::lookupIsolated(cache, client, cancelled);
+    if (hit.runtime != HolonightImages::RuntimeStatus::Success) {
+      return runtimeFailure(hit.runtime, hit.diagnostic);
+    }
+    if (hit.image) {
+      return finish(std::move(*hit.image), sourceSize);
     }
   }
   auto rendered = HolonightImages::rasterizeSvg(
@@ -114,6 +125,11 @@ ThumbnailResult decodeSvg(QFile& file, const QByteArray& path, const struct stat
 }  // namespace
 
 ThumbnailResult decodeThumbnail(const ThumbnailRequest& request, const std::atomic_bool& cancelled) {
+  return decodeThumbnail(request, cancelled, HolonightFileBrowser::defaultImageRuntimeOptions());
+}
+ThumbnailResult decodeThumbnail(const ThumbnailRequest& request, const std::atomic_bool& cancelled,
+                                const HolonightFileBrowser::ImageRuntimeOptions& options) {
+  const HolonightImages::IsolatedClient client(options.directory);
   if (cancelled.load()) {
     return failure(outcomeError(HolonightImages::Outcome::Cancelled));
   }
@@ -138,9 +154,14 @@ ThumbnailResult decodeThumbnail(const ThumbnailRequest& request, const std::atom
     return failure(QStringLiteral("Not a regular image file."));
   }
   if (QFileInfo(QFile::decodeName(path)).suffix().compare(QLatin1String("svg"), Qt::CaseInsensitive) == 0) {
-    return decodeSvg(file, path, metadata, request.box_pixels, cancelled);
+    return decodeSvg(file, path, metadata, request.box_pixels, cancelled, client);
   }
-  const auto inspection = HolonightImages::inspect(file, kRasterLimits, cancelled);
+  const auto inspected =
+      client.inspect(file, kRasterLimits, cancelled, HolonightImages::OrientationPolicy::Apply, false);
+  if (inspected.runtime != HolonightImages::RuntimeStatus::Success) {
+    return runtimeFailure(inspected.runtime, inspected.diagnostic);
+  }
+  const auto& inspection = *inspected.result;
   if (inspection.outcome != HolonightImages::Outcome::Success) {
     return failure(outcomeError(inspection.outcome));
   }
@@ -151,12 +172,20 @@ ThumbnailResult decodeThumbnail(const ThumbnailRequest& request, const std::atom
           : inspection.orientedSize.scaled(pixelBox, Qt::KeepAspectRatio);
   const auto cache = cacheRequest(path, metadata, required, HolonightThumbnails::Kind::Raster);
   if (useDiskCache(request.box_pixels)) {
-    if (auto hit = HolonightThumbnails::lookup(cache, cancelled)) {
-      return finish(std::move(*hit), inspection.orientedSize);
+    auto hit = HolonightThumbnails::lookupIsolated(cache, client, cancelled);
+    if (hit.runtime != HolonightImages::RuntimeStatus::Success) {
+      return runtimeFailure(hit.runtime, hit.diagnostic);
+    }
+    if (hit.image) {
+      return finish(std::move(*hit.image), inspection.orientedSize);
     }
   }
-  auto decoded = HolonightImages::decode(
-      file, {.limits = kRasterLimits, .bound = {request.box_pixels, request.box_pixels}}, cancelled);
+  auto reply =
+      client.decode(file, {.limits = kRasterLimits, .bound = {request.box_pixels, request.box_pixels}}, cancelled);
+  if (reply.runtime != HolonightImages::RuntimeStatus::Success) {
+    return runtimeFailure(reply.runtime, reply.diagnostic);
+  }
+  auto& decoded = *reply.result;
   if (decoded.outcome != HolonightImages::Outcome::Success || decoded.image.isNull()) {
     return failure(outcomeError(decoded.outcome));
   }

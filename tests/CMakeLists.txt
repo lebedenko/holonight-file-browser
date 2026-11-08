@@ -23,7 +23,10 @@ if(BUILD_FILE_BROWSER_SEARCH)
   add_test(NAME browser-search COMMAND browser-search-tests)
 endif()
 if(BUILD_FILE_BROWSER_PREVIEW)
-  qt_add_executable(browser-preview-tests service_main.cpp text_lines_test.cpp text_line_model_test.cpp native_preview_test.cpp)
+  set(HOLONIGHT_FILE_BROWSER_TEST_FIXTURES "" CACHE PATH "Explicit Images fixture directory for consumer acceptance")
+  set(HOLONIGHT_FILE_BROWSER_TEST_RUNTIME "" CACHE PATH "Explicit native test runtime")
+  qt_add_executable(browser-preview-tests service_main.cpp text_lines_test.cpp text_line_model_test.cpp native_preview_test.cpp isolated_preview_test.cpp)
+  target_compile_definitions(browser-preview-tests PRIVATE BROWSER_TEST_RUNTIME="${HOLONIGHT_FILE_BROWSER_TEST_RUNTIME}" BROWSER_TEST_FIXTURES="${HOLONIGHT_FILE_BROWSER_TEST_FIXTURES}")
   target_link_libraries(browser-preview-tests PRIVATE HolonightFileBrowser::Preview Qt6::Test GTest::gtest)
   if(BUILD_FILE_BROWSER_PREVIEW_QUICK)
     target_link_libraries(browser-preview-tests PRIVATE HolonightFileBrowser::PreviewQuick)
@@ -36,7 +39,7 @@ foreach(component Search Storage Preview PreviewQuick Markdown)
   if(TARGET HolonightFileBrowser::${component})
     add_test(NAME browser-installed-${component} COMMAND ${CMAKE_COMMAND}
       -DPROVIDER_BUILD=${CMAKE_BINARY_DIR} -DCONSUMER_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/component-consumer
-      -DCOMPONENT=${component} "-DPROVIDER_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+      -DCOMPONENT=${component} "-DTEST_RUNTIME=${HOLONIGHT_FILE_BROWSER_TEST_RUNTIME}" "-DPROVIDER_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
       "-DPROVIDER_QML_PATH=${QML_IMPORT_PATH}" -P ${CMAKE_CURRENT_SOURCE_DIR}/installed-consumer.cmake)
   endif()
 endforeach()

@@ -4,6 +4,7 @@
 #include <QSize>
 #include <QString>
 
+#include <HolonightFileBrowser/preview/runtime_options.h>
 #include <atomic>
 
 struct ThumbnailRequest {
@@ -20,8 +21,13 @@ struct ThumbnailResult {
   QSize source_size;
   QString error;
   bool cache_eligible = true;
+  HolonightImages::RuntimeStatus runtime = HolonightImages::RuntimeStatus::Success;
+  QString diagnostic;
 };
 
 // Runs on a worker thread and touches no GUI state. The image is at most box_pixels on each side, is never
 // enlarged unless it is an SVG, and holds the first frame of an animation.
 ThumbnailResult decodeThumbnail(const ThumbnailRequest& request, const std::atomic_bool& cancelled);
+
+ThumbnailResult decodeThumbnail(const ThumbnailRequest& request, const std::atomic_bool& cancelled,
+                                const HolonightFileBrowser::ImageRuntimeOptions& options);

@@ -44,6 +44,9 @@ class PreviewService : public QObject {
     Unsupported,
     ResourceLimit,
     IoFailure,
+    RuntimeUnavailable,
+    RuntimeFailure,
+    CleanupFailure,
   };
   Q_ENUM(PreviewErrorKind)
 
@@ -107,6 +110,7 @@ class PreviewService : public QObject {
   Q_PROPERTY(QString iconName READ iconName NOTIFY changed)
 
   explicit PreviewService(QObject* parent = nullptr);
+  explicit PreviewService(HolonightFileBrowser::ImageRuntimeOptions options, QObject* parent = nullptr);
   ~PreviewService() override;
   PreviewService(const PreviewService&) = delete;
   PreviewService& operator=(const PreviewService&) = delete;
@@ -181,6 +185,7 @@ class PreviewService : public QObject {
   void shutdownFinished();
 
  private:
+  HolonightFileBrowser::ImageRuntimeOptions runtime_options_;
   friend struct PreviewServiceTestAccess;
   static PreviewError rasterError(HolonightImages::Outcome outcome);
   void dispatchText();
@@ -206,6 +211,7 @@ class PreviewService : public QObject {
   PreviewError quick_look_error_;
   std::shared_ptr<std::atomic_bool> text_cancellation_;
   std::function<void()> before_full_decode_for_test_;
+  std::function<void()> memory_lookup_for_test_;
   std::shared_ptr<PreviewWorkerCache> cache_;
   bool active_job_ = false;
   bool pending_job_ = false;

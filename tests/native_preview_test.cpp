@@ -16,6 +16,10 @@
 #include <unistd.h>
 
 TEST(NativePreview, IdenticalDisplayNamesOpenDistinctDescriptors) {
+  if (QString::fromUtf8(BROWSER_TEST_RUNTIME).isEmpty()) {
+    GTEST_SKIP() << "Explicit native runtime required";
+  }
+  const HolonightFileBrowser::ImageRuntimeOptions options{QString::fromUtf8(BROWSER_TEST_RUNTIME)};
   QTemporaryDir directory;
   ASSERT_TRUE(directory.isValid());
   const auto root = QFile::encodeName(directory.path());
@@ -33,7 +37,7 @@ TEST(NativePreview, IdenticalDisplayNamesOpenDistinctDescriptors) {
     pixels.fill(path == first ? Qt::red : Qt::blue);
     ASSERT_TRUE(pixels.save(&file, "PNG"));
   }
-  PreviewService preview;
+  PreviewService preview(options);
   for (const auto& path : {first, second, first}) {
     // Deliberately identical display name and caller metadata: native identity must
     // invalidate the current generation even when the presentation values match.
@@ -44,12 +48,12 @@ TEST(NativePreview, IdenticalDisplayNamesOpenDistinctDescriptors) {
     EXPECT_EQ(HolonightFileBrowser::nativePath(preview.markdownBaseUrl()), path);
     const std::atomic_bool cancelled{false};
     const auto thumbnail =
-        decodeThumbnail({.path = QFile::decodeName(path), .box_pixels = 128, .native_path = path}, cancelled);
+        decodeThumbnail({.path = QFile::decodeName(path), .box_pixels = 128, .native_path = path}, cancelled, options);
     ASSERT_FALSE(thumbnail.image.isNull()) << thumbnail.error.toStdString();
     EXPECT_EQ(thumbnail.image.pixelColor(0, 0), QColor(path == first ? Qt::red : Qt::blue));
   }
 #ifdef BROWSER_TEST_PREVIEW_QUICK
-  ThumbnailProvider provider;
+  ThumbnailProvider provider(options);
   for (const auto& path : {first, second, first}) {
     std::unique_ptr<QQuickImageResponse> response(
         provider.requestImageResponse(ThumbnailProvider::idForNative(path, 128, 0), {}));

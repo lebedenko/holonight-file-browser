@@ -4,6 +4,7 @@
 #include <QIODevice>
 #include <QString>
 
+#include <HolonightFileBrowser/preview/runtime_options.h>
 #include <atomic>
 #include <holonight_images/image.h>
 #include <memory>
@@ -14,6 +15,8 @@ namespace ExifReader {
 
 struct ExifSummary {
   std::optional<HolonightImages::Outcome> outcome;
+  HolonightImages::RuntimeStatus runtime = HolonightImages::RuntimeStatus::Success;
+  QString diagnostic;
   bool present = false;
   QString make;
   QString model;
@@ -25,7 +28,12 @@ struct ExifSummary {
   bool operator==(const ExifSummary&) const = default;
 };
 
-ExifSummary read(const QString& path, const QByteArray& mimeType);
-ExifSummary read(QIODevice& source, const QByteArray& mimeType, const std::shared_ptr<std::atomic_bool>& cancel = {});
+ExifSummary format(const HolonightImages::MetadataResult& result);
+ExifSummary read(
+    const QString& path, const QByteArray& mimeType,
+    const HolonightFileBrowser::ImageRuntimeOptions& options = HolonightFileBrowser::defaultImageRuntimeOptions());
+ExifSummary read(
+    QIODevice& source, const QByteArray& mimeType, const std::shared_ptr<std::atomic_bool>& cancel = {},
+    const HolonightFileBrowser::ImageRuntimeOptions& options = HolonightFileBrowser::defaultImageRuntimeOptions());
 
 }  // namespace ExifReader

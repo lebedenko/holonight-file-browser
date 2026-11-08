@@ -18,6 +18,8 @@
 // The value type that crosses the worker->UI queued connection. Only PreviewService's own
 // dispatch()/applyResult() (and the free runPreviewJob() worker function below) ever touch one.
 struct PreviewResult {
+  HolonightImages::RuntimeStatus runtime = HolonightImages::RuntimeStatus::Success;
+  QString diagnostic;
   quint64 generation = 0;
   bool final = true;
   QString mime_type;
@@ -38,9 +40,14 @@ struct PreviewResult {
 };
 
 struct PreviewWorkerCache {
+  struct RasterFacts {
+    QSize source_size;
+    ExifReader::ExifSummary exif;
+  };
   struct Entry {
     QString key;
     QImage image;
+    std::optional<RasterFacts> raster;
   };
   std::list<Entry> entries;
   qint64 bytes = 0;
@@ -54,11 +61,19 @@ struct PreviewWorkerCache {
     }
     return {};
   }
-  void insert(const QString& key, const QImage& image) {
-    constexpr qint64 budget = 64LL * 1024 * 1024;
-    if (image.isNull() || image.sizeInBytes() > budget) {
-      return;
+  [[nodiscard]] std::optional<Entry> rasterCandidate(const QString& key, QSize bound) const {
+    for (const auto& entry : entries) {
+      if (entry.key != key || !entry.raster) {
+        continue;
+      }
+      const auto needed = ThumbnailService::requiredSize(entry.raster->source_size, bound);
+      if (entry.image.width() >= needed.width() && entry.image.height() >= needed.height()) {
+        return entry;
+      }
     }
+    return std::nullopt;
+  }
+  void remove(const QString& key) {
     for (auto it = entries.begin(); it != entries.end();) {
       if (it->key == key) {
         bytes -= it->image.sizeInBytes();
@@ -67,20 +82,67 @@ struct PreviewWorkerCache {
         ++it;
       }
     }
+  }
+  void insert(const QString& key, const QImage& image, std::optional<RasterFacts> raster = std::nullopt) {
+    constexpr qint64 budget = 64LL * 1024 * 1024;
+    if (image.isNull() || image.sizeInBytes() > budget) {
+      return;
+    }
+    remove(key);
     while (!entries.empty() && (entries.size() >= 2 || bytes + image.sizeInBytes() > budget)) {
       bytes -= entries.back().image.sizeInBytes();
       entries.pop_back();
     }
-    entries.push_front({.key = key, .image = image});
+    entries.push_front({.key = key, .image = image, .raster = std::move(raster)});
     bytes += image.sizeInBytes();
   }
 };
 
 namespace {
+using HolonightFileBrowser::ImageRuntimeOptions;
+PreviewService::PreviewError runtimeError(HolonightImages::RuntimeStatus status) {
+  using HolonightImages::RuntimeStatus;
+  using Kind = PreviewService::PreviewErrorKind;
+  Kind kind = Kind::None;
+  switch (status) {
+    case RuntimeStatus::Success:
+    case RuntimeStatus::Cancelled:
+      return {};
+    case RuntimeStatus::Unavailable:
+      kind = Kind::RuntimeUnavailable;
+      break;
+    case RuntimeStatus::ProtocolFailure:
+      kind = Kind::RuntimeFailure;
+      break;
+    case RuntimeStatus::CleanupFailure:
+      kind = Kind::CleanupFailure;
+      break;
+    case RuntimeStatus::Timeout:
+      kind = Kind::DecodeTimeout;
+      break;
+  }
+  return {.kind = kind, .message = HolonightFileBrowser::imageRuntimeError(status)};
+}
 constexpr int kDecodeTimeoutMs = 3000;
 constexpr int kResizeDebounceMs = 150;
 constexpr qint64 kTextViewerMaxBytes = 102400;
 constexpr qint64 kSniffBytes = 8192;
+
+QString sourceIdentity(const struct stat& info) {
+  return QStringLiteral("%1:%2:%3:%4:%5:%6:%7")
+      .arg(info.st_dev)
+      .arg(info.st_ino)
+      .arg(info.st_size)
+      .arg(info.st_mtim.tv_sec)
+      .arg(info.st_mtim.tv_nsec)
+      .arg(info.st_ctim.tv_sec)
+      .arg(info.st_ctim.tv_nsec);
+}
+
+bool unchangedSource(QFile& file, const QString& identity) {
+  struct stat info{};
+  return ::fstat(file.handle(), &info) == 0 && S_ISREG(info.st_mode) && sourceIdentity(info) == identity;
+}
 
 QString formatPermissions(quint32 rawMode) {
   const auto mode = static_cast<mode_t>(rawMode);
@@ -124,13 +186,53 @@ QString formatPermissions(quint32 rawMode) {
   return result;
 }
 
-PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& nativePath, const QString& identity,
+// Keep progressive publication and cancellation checkpoints in request order.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& nativePath, QString identity,
                           PreviewResult result, const std::shared_ptr<std::atomic_bool>& cancel, QSize requestedSize,
                           PreviewWorkerCache& cache, const std::function<void(const PreviewResult&)>& publish,
-                          const std::function<void()>& beforeFullDecode, const ThumbnailService::StageCallback& stage) {
-  const auto inspection =
-      HolonightImages::inspect(file, kPreviewImageLimits, *cancel, HolonightImages::OrientationPolicy::Apply, false);
-  if (inspection.outcome == HolonightImages::Outcome::Cancelled || cancel->load()) {
+                          const std::function<void()>& beforeFullDecode, const ThumbnailService::StageCallback& stage,
+                          const ImageRuntimeOptions& options, const std::function<void()>& memoryCheckpoint) {
+  if (const auto candidate = cache.rasterCandidate(identity, requestedSize)) {
+    if (memoryCheckpoint) {
+      memoryCheckpoint();
+    }
+    if (cancel->load()) {
+      return result;
+    }
+    if (unchangedSource(file, identity)) {
+      result.image = cache.lookup(identity, candidate->image.size());
+      result.source_pixel_size = candidate->raster->source_size;
+      result.document_size = result.source_pixel_size;
+      result.raster_outcome = HolonightImages::Outcome::Success;
+      result.final = false;
+      if (!cancel->load()) {
+        publish(result);
+      }
+      result.final = true;
+      result.image = {};
+      result.exif = candidate->raster->exif;
+      return result;
+    }
+    cache.remove(identity);
+    // The miss path must not read a disk entry using the identity we just rejected.
+    struct stat current{};
+    if (::fstat(file.handle(), &current) != 0 || !S_ISREG(current.st_mode)) {
+      result.raster_outcome = HolonightImages::Outcome::IoFailure;
+      return result;
+    }
+    identity = sourceIdentity(current);
+  }
+  const auto reply = HolonightImages::IsolatedClient(options.directory)
+                         .inspect(file, kPreviewImageLimits, *cancel, HolonightImages::OrientationPolicy::Apply, true);
+  result.runtime = reply.runtime;
+  result.diagnostic = reply.diagnostic;
+  if (reply.runtime != HolonightImages::RuntimeStatus::Success) {
+    return result;
+  }
+  const auto& inspection = *reply.result;
+  result.raster_outcome = inspection.outcome;
+  if (inspection.outcome != HolonightImages::Outcome::Success || cancel->load()) {
     return result;
   }
   result.source_pixel_size = inspection.orientedSize;
@@ -142,10 +244,15 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
   result.image = cache.lookup(identity, needed);
   if (result.image.isNull() && tier) {
     const auto cached = ThumbnailService::lookup(file, path, identity, *tier, needed, *cancel, stage,
-                                                 ThumbnailService::ImageKind::Raster, nativePath);
+                                                 ThumbnailService::ImageKind::Raster, nativePath, options);
     if (cached) {
       result.image = cached->image;
       result.raster_outcome = cached->outcome;
+      result.runtime = cached->runtime;
+      result.diagnostic = cached->diagnostic;
+      if (result.runtime != HolonightImages::RuntimeStatus::Success) {
+        return result;
+      }
     }
   }
   if (cancel->load()) {
@@ -166,11 +273,16 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
     }
     // The provider fits the source to this bound. Fitting an already rounded
     // `needed` size again can lose a pixel and cause endless adequacy upgrades.
-    auto decoded =
-        tier ? ThumbnailService::lookupOrDecode(file, path, identity, *tier, needed, *cancel, stage, nativePath)
-             : ThumbnailService::decodeScaled(file, requestedSize, *cancel, stage);
+    auto decoded = tier ? ThumbnailService::lookupOrDecode(file, path, identity, *tier, needed, *cancel, stage,
+                                                           nativePath, options)
+                        : ThumbnailService::decodeScaled(file, requestedSize, *cancel, stage, options);
     result.image = std::move(decoded.image);
     result.raster_outcome = decoded.outcome;
+    result.runtime = decoded.runtime;
+    result.diagnostic = decoded.diagnostic;
+    if (result.runtime != HolonightImages::RuntimeStatus::Success) {
+      return result;
+    }
   }
   if (cancel->load()) {
     return result;
@@ -181,7 +293,7 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
   if (cancel->load()) {
     return result;
   }
-  cache.insert(identity, result.image);
+  const auto image = result.image;
   result.final = false;
   if (cancel->load()) {
     return result;
@@ -192,14 +304,21 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
   if (cancel->load()) {
     return result;
   }
-  result.exif = ExifReader::read(file, result.mime_type.toUtf8(), cancel);
+  if (result.mime_type == QLatin1String("image/jpeg") || result.mime_type == QLatin1String("image/png")) {
+    result.exif = ExifReader::format(inspection.metadata);
+  }
+  if (!cancel->load() && result.raster_outcome == HolonightImages::Outcome::Success &&
+      unchangedSource(file, identity) && !cancel->load()) {
+    cache.insert(identity, image,
+                 PreviewWorkerCache::RasterFacts{.source_size = result.source_pixel_size, .exif = result.exif});
+  }
   return result;
 }
 
 PreviewResult decodeSvg(QFile& file, const QString& path, const QByteArray& nativePath, const QString& identity,
                         PreviewResult result, const std::shared_ptr<std::atomic_bool>& cancel, QSize requestedSize,
                         PreviewWorkerCache& cache, const std::function<void()>& beforeFullDecode,
-                        const ThumbnailService::StageCallback& stage) {
+                        const ThumbnailService::StageCallback& stage, const ImageRuntimeOptions& options) {
   if (!requestedSize.isValid() || requestedSize.isEmpty()) {
     requestedSize = QSize(1024, 1024);
   }
@@ -233,11 +352,16 @@ PreviewResult decodeSvg(QFile& file, const QString& path, const QByteArray& nati
   const auto cacheIdentity = identity + QStringLiteral(":svg-self-contained-static-v1");
   result.image = cache.lookup(cacheIdentity, needed);
   if (result.image.isNull() && tier) {
-    const auto cached =
-        ThumbnailService::lookup(file, path, identity, *tier, needed, *cancel, stage, result.image_kind, nativePath);
+    const auto cached = ThumbnailService::lookup(file, path, identity, *tier, needed, *cancel, stage, result.image_kind,
+                                                 nativePath, options);
     if (cached) {
       result.image = cached->image;
       result.raster_outcome = cached->outcome;
+      result.runtime = cached->runtime;
+      result.diagnostic = cached->diagnostic;
+      if (result.runtime != HolonightImages::RuntimeStatus::Success) {
+        return result;
+      }
     }
   }
   if (cancel->load() || result.raster_outcome == HolonightImages::Outcome::Cancelled) {
@@ -264,7 +388,8 @@ PreviewResult runPreviewJob(const QString& path, const QByteArray& nativePath, q
                             const std::shared_ptr<std::atomic_bool>& cancel, QSize requestedSize,
                             PreviewWorkerCache& cache, const std::function<void(const PreviewResult&)>& publish,
                             const std::function<void()>& beforeFullDecode, const ThumbnailService::StageCallback& stage,
-                            bool textOnly = false) {
+                            const ImageRuntimeOptions& options, bool textOnly = false,
+                            const std::function<void()>& memoryCheckpoint = {}) {
   PreviewResult result;
   result.generation = generation;
   if (cancel->load()) {
@@ -301,14 +426,7 @@ PreviewResult runPreviewJob(const QString& path, const QByteArray& nativePath, q
     };
     return result;
   }
-  const QString identity = QStringLiteral("%1:%2:%3:%4:%5:%6:%7")
-                               .arg(info.st_dev)
-                               .arg(info.st_ino)
-                               .arg(info.st_size)
-                               .arg(info.st_mtim.tv_sec)
-                               .arg(info.st_mtim.tv_nsec)
-                               .arg(info.st_ctim.tv_sec)
-                               .arg(info.st_ctim.tv_nsec);
+  const QString identity = sourceIdentity(info);
   const auto sniff = file.read(kSniffBytes);
   if (file.error() != QFileDevice::NoError) {
     result.error = {.kind = PreviewService::PreviewErrorKind::DecodeFailed, .message = file.errorString()};
@@ -343,7 +461,8 @@ PreviewResult runPreviewJob(const QString& path, const QByteArray& nativePath, q
   }
   if (mime.name() == QLatin1String("image/svg+xml") ||
       QFileInfo(path).suffix().compare(QLatin1String("svg"), Qt::CaseInsensitive) == 0) {
-    return decodeSvg(file, path, nativePath, identity, result, cancel, requestedSize, cache, beforeFullDecode, stage);
+    return decodeSvg(file, path, nativePath, identity, result, cancel, requestedSize, cache, beforeFullDecode, stage,
+                     options);
   }
   if (mime.name() == QLatin1String("image/svg+xml-compressed")) {
     result.error = {
@@ -354,14 +473,20 @@ PreviewResult runPreviewJob(const QString& path, const QByteArray& nativePath, q
   }
   if (mime.name().startsWith(QStringLiteral("image/"))) {
     return decodeImage(file, path, nativePath, identity, result, cancel, requestedSize, cache, publish,
-                       beforeFullDecode, stage);
+                       beforeFullDecode, stage, options, memoryCheckpoint);
   }
   return result;
 }
 }  // namespace
 
 PreviewService::PreviewService(QObject* parent)
-    : QObject(parent), worker_(new QObject), cache_(std::make_shared<PreviewWorkerCache>()) {
+    : PreviewService(HolonightFileBrowser::defaultImageRuntimeOptions(), parent) {}
+
+PreviewService::PreviewService(ImageRuntimeOptions options, QObject* parent)
+    : QObject(parent),
+      runtime_options_(std::move(options)),
+      worker_(new QObject),
+      cache_(std::make_shared<PreviewWorkerCache>()) {
   worker_->moveToThread(&thread_);
   connect(&thread_, &QThread::finished, worker_, &QObject::deleteLater);
   connect(&thread_, &QThread::finished, this, &PreviewService::shutdownFinished);
@@ -533,13 +658,14 @@ void PreviewService::dispatchText() {
   const auto cancel = std::make_shared<std::atomic_bool>(false);
   text_cancellation_ = cancel;
   const auto beforeText = before_text_for_test_;
+  const auto options = runtime_options_;
   QMetaObject::invokeMethod(
       worker_,
-      [this, request, generation, revision, path, nativePath, cancel, beforeText] {
+      [this, request, generation, revision, path, nativePath, cancel, beforeText, options] {
         if (!cancel->load() && beforeText) {
           beforeText();
         }
-        const auto result = runPreviewJob(path, nativePath, generation, cancel, {}, *cache_, {}, {}, {}, true);
+        const auto result = runPreviewJob(path, nativePath, generation, cancel, {}, *cache_, {}, {}, {}, options, true);
         if (cancel->load()) {
           return;
         }
@@ -616,16 +742,23 @@ void PreviewService::startJob() {
   const auto beforeDispatch = before_dispatch_for_test_;
   const auto stage = thumbnail_stage_for_test_;
   const auto beforeFull = before_full_decode_for_test_;
+  const auto memoryCheckpoint = memory_lookup_for_test_;
+  const auto options = runtime_options_;
   QMetaObject::invokeMethod(
       worker_,
-      [this, path, nativePath, generation, cancel, size, beforeDispatch, beforeFull, stage] {
+      [this, path, nativePath, generation, cancel, size, beforeDispatch, beforeFull, stage, options, memoryCheckpoint] {
         const auto publish = [this](const PreviewResult& result) {
           QMetaObject::invokeMethod(this, [this, result] { applyResult(result); }, Qt::QueuedConnection);
         };
         if (!cancel->load() && beforeDispatch) {
           beforeDispatch();
         }
-        auto result = runPreviewJob(path, nativePath, generation, cancel, size, *cache_, publish, beforeFull, stage);
+        auto result = runPreviewJob(path, nativePath, generation, cancel, size, *cache_, publish, beforeFull, stage,
+                                    options, false, memoryCheckpoint);
+        if (result.runtime != HolonightImages::RuntimeStatus::Success &&
+            result.runtime != HolonightImages::RuntimeStatus::Cancelled) {
+          qWarning() << "Preview runtime failure" << static_cast<int>(result.runtime) << result.diagnostic;
+        }
         if (!cancel->load()) {
           publish(result);
         }
@@ -641,7 +774,9 @@ void PreviewService::startJob() {
 }
 
 void PreviewService::applyResult(const PreviewResult& result) {
-  if (result.raster_outcome == HolonightImages::Outcome::Cancelled) {
+  if (result.runtime == HolonightImages::RuntimeStatus::Cancelled ||
+      (result.runtime == HolonightImages::RuntimeStatus::Success &&
+       result.raster_outcome == HolonightImages::Outcome::Cancelled)) {
     if (result.generation == generation_ && !timed_out_) {
       timeout_timer_.stop();
       busy_ = false;
@@ -671,7 +806,11 @@ void PreviewService::applyResult(const PreviewResult& result) {
   document_size_ = result.document_size;
   image_kind_ = result.image_kind;
   exif_ = result.exif;
-  error_ = result.raster_outcome ? rasterError(*result.raster_outcome) : result.error;
+  if (result.runtime != HolonightImages::RuntimeStatus::Success) {
+    error_ = runtimeError(result.runtime);
+  } else {
+    error_ = result.raster_outcome ? rasterError(*result.raster_outcome) : result.error;
+  }
   quick_look_error_ = error_;
   if (result.final && quick_look_active_) {
     if (quickLookEligibility() == QuickLookEligibility::Unsupported && error_.kind == PreviewErrorKind::None) {
@@ -784,7 +923,8 @@ PreviewService::PreviewError PreviewService::rasterError(HolonightImages::Outcom
     case Outcome::Cancelled:
       return {};
     case Outcome::Unsupported:
-      return {.kind = PreviewErrorKind::Unsupported, .message = tr("The image format is not recognized.")};
+      return {.kind = PreviewErrorKind::Unsupported,
+              .message = tr("The image format or color profile is not supported.")};
     case Outcome::Damaged:
       return {.kind = PreviewErrorKind::DecodeFailed, .message = tr("The image is damaged or could not be decoded.")};
     case Outcome::ResourceLimit:

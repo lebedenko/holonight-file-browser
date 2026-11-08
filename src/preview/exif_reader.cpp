@@ -4,19 +4,31 @@
 #include <HolonightFileBrowser/preview/image_policy.h>
 #include <cmath>
 namespace ExifReader {
-ExifSummary read(const QString& path, const QByteArray& mimeType) {
+ExifSummary read(const QString& path, const QByteArray& mimeType,
+                 const HolonightFileBrowser::ImageRuntimeOptions& options) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
     return {};
   }
-  return read(file, mimeType);
+  return read(file, mimeType, {}, options);
 }
-ExifSummary read(QIODevice& source, const QByteArray& mimeType, const std::shared_ptr<std::atomic_bool>& cancel) {
+ExifSummary read(QIODevice& source, const QByteArray& mimeType, const std::shared_ptr<std::atomic_bool>& cancel,
+                 const HolonightFileBrowser::ImageRuntimeOptions& options) {
   if (mimeType != "image/jpeg" && mimeType != "image/png") {
     return {};
   }
   const std::atomic_bool running{false};
-  const auto result = HolonightImages::readMetadata(source, kPreviewImageLimits, cancel ? *cancel : running);
+  const auto reply = HolonightImages::IsolatedClient(options.directory)
+                         .readMetadata(source, kPreviewImageLimits, cancel ? *cancel : running);
+  if (reply.runtime != HolonightImages::RuntimeStatus::Success) {
+    ExifSummary summary;
+    summary.runtime = reply.runtime;
+    summary.diagnostic = reply.diagnostic;
+    return summary;
+  }
+  return format(*reply.result);
+}
+ExifSummary format(const HolonightImages::MetadataResult& result) {
   const auto& facts = result.facts;
   ExifSummary summary;
   summary.outcome = result.outcome;
