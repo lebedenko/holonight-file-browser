@@ -354,3 +354,42 @@ Record stale pixels/metadata, visible delays or hangs. Native pointer/focus inte
 remains user-driven. The user subsequently confirmed that the manual warm-revisit
 checks passed and authorized committing, publishing and pinning the milestone.
 Deployment remains outside this milestone.
+
+## Experiment 0 scheduler control (2026-11-09)
+
+The umbrella [installed-consumer harness](../../../../tooling/preview-benchmark/README.md#experiment-0-attribution-and-scheduler-evidence-2026-11-09)
+now exercises ThumbnailProvider itself, including queueing, response completion,
+cancellation, cache hits and draining. Fresh A/B installed PreviewQuick packages
+use the frozen revisions with two explicitly configured threads and 256-pixel
+boxes. Production defaults remain unchanged. Each batch uses 16 distinct copies;
+cold, same-provider warm repeat and first-12 cancellation workloads rotate four
+frozen fixtures. `grid-decode` remains the separate synchronous decoder case.
+
+Issued requests, decoder entries, cancelled requests that never entered decoding,
+cancelled requests that did enter, finished responses and validated delivered
+images are independent counters. Cancellation is not evidence of interrupted
+codec execution. Responses survive through completion; pending work drains before
+teardown. Controlled decoder barriers verify queueing, cancellation before/after
+entry, warm hits with no decoding, exact synthetic pixels, response destruction
+while decoding, and complete draining against A/B/D. These are response delivery
+observations, not rendered QML frame times.
+
+The scheduler run stopped at the first unexplained cleanup failure, preserving
+418 exploratory batches. Those batches repeated one fixture each and are
+excluded from the requested mixed-fixture control. The final harness cycles all
+four fixtures within every 16-request batch and passes in-process smoke checks;
+no corrected B measurement followed the cleanup failure. Frozen B's oriented-JPEG cancellation batch delivered three of
+four surviving requests; all responses finished and pending work reached zero.
+No retry or extra manager cleanup followed. Warm batches in both baselines entered
+no decoder. Concurrent preparation work and incomplete counts limit latency
+interpretation. The
+[umbrella report](../../../../docs/initiatives/image-isolation.md#experiment-0-missing-evidence-2026-11-09)
+records exact counts, paths and the separate D attribution/resource passes.
+
+Diagnostic consumer probes exist only in archived source overlays: job dispatch,
+worker entry, cache lookup, publication and actual delivery correlate provider
+calls without changing public APIs, messages, cache policy or the three-second
+deadline. The instrumented packages pass all five focused isolation regressions
+and existing Files/chooser offscreen acceptance. Historical cleanup causes remain
+unresolved; no optimization is selected or implemented while Experiment 0 remains
+incomplete.
