@@ -46,7 +46,9 @@ QPixmap IconImageProvider::requestPixmap(const QString& chain, QSize* size, cons
       // Use the shared semantic engine even for colorful SVGs. QIcon's generic SVG
       // loader does not resolve HoloNight's accent roles. Retain Qt's unthemed fallback.
       QIcon icon(new Holonight::HnIconEngine(name));
-      if (icon.isNull()) icon = QIcon::fromTheme(name);
+      if (icon.isNull()) {
+        icon = QIcon::fromTheme(name);
+      }
       if (!icon.isNull()) {
         // Explicit ratio 1: extent is already physical, and QIcon::pixmap(QSize) would otherwise
         // multiply it by the application-wide ratio a second time.
