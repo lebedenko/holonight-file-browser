@@ -25,12 +25,108 @@ QByteArray appearance(const QByteArray& scheme, const QByteArray& accent) {
   return "version = 2\n[theme]\nscheme = \"" + scheme + "\"\naccent = \"" + accent +
          "\"\n[icons]\ntheme = \"live-test\"\nfallback = \"live-test\"\n";
 }
+bool listingIconMatches(QQuickItem* listing, const QImage& image, const QColor& body, const QString& revision) {
+  bool checked = false;
+  auto inspect = [&](auto&& self, QQuickItem* parent) -> void {
+    for (auto* child : parent->childItems()) {
+      const auto source = child->property("source").toUrl().toString();
+      if (child->property("rendering").isValid() && source.startsWith("image://icon/")) {
+        const auto point = child->mapToScene({child->width() / 4, child->height() / 4}).toPoint();
+        checked = source.endsWith("?revision=" + revision) && image.pixelColor(point) == body;
+      }
+      self(self, child);
+    }
+  };
+  inspect(inspect, listing);
+  return checked;
+}
+int checkPixels(QObject& object, const QImage& image, const QImage& previous) {
+  if (image.isNull()) {
+    return 6;
+  }
+  const auto body = image.pixelColor(8, 8);
+  if (body != QGuiApplication::palette().color(QPalette::Accent)) {
+    qCritical() << "Stale body" << body << QGuiApplication::palette().color(QPalette::Accent);
+    return 7;
+  }
+  if (image.pixelColor(26, 6) != QGuiApplication::palette().color(QPalette::Text) ||
+      image.pixelColor(8, 24).lightnessF() >= body.lightnessF()) {
+    return 8;
+  }
+  for (int offset : {40, 72}) {
+    if (image.pixelColor(offset, 8) != body) {
+      return 9;
+    }
+  }
+  if (!previous.isNull() && previous == image) {
+    return 10;
+  }
+  auto* listing = object.findChild<QQuickItem*>("listing");
+  if (listing == nullptr || listing->property("selectedPaths").toStringList() != QStringList{"/kept"} ||
+      listing->property("currentIndex").toInt() != 0 || listing->property("count").toInt() != 1) {
+    return 14;
+  }
+  if (!listingIconMatches(listing, image, body, object.property("revision").toString())) {
+    return 15;
+  }
+  return 0;
+}
+int checkTransitions(QObject& object, QQuickWindow& window, const QString& path) {
+  QImage previous;
+  for (const auto& selection : {qMakePair(QByteArray("holonight-dark"), QByteArray("blue")),
+                                qMakePair(QByteArray("holonight-mocha"), QByteArray("default")),
+                                qMakePair(QByteArray("holonight-mocha"), QByteArray("violet")),
+                                qMakePair(QByteArray("holonight-light"), QByteArray("blue")),
+                                qMakePair(QByteArray("holonight-dark"), QByteArray("blue")),
+                                qMakePair(QByteArray("holonight-mocha"), QByteArray("violet"))}) {
+    const auto revision = object.property("revision").toInt();
+    if (!write(path, appearance(selection.first, selection.second))) {
+      return 4;
+    }
+    if (!previous.isNull() && !QTest::qWaitFor([&] { return object.property("revision").toInt() > revision; })) {
+      return 5;
+    }
+    QImage image;
+    if (!QTest::qWaitFor([&] {
+          if (!object.property("imagesReady").toBool()) {
+            return false;
+          }
+          image = window.grabWindow();
+          return !image.isNull() && image.pixelColor(8, 8) == QGuiApplication::palette().color(QPalette::Accent);
+        })) {
+      qCritical() << "Appearance image readiness timed out" << selection;
+      return 17;
+    }
+    if (const int result = checkPixels(object, image, previous); result != 0) {
+      return result;
+    }
+    previous = image;
+  }
+  // Icon-only updates must reach Qt independently of palette changes.
+  auto bytes = appearance("holonight-mocha", "violet");
+  bytes.replace("theme = \"live-test\"", "theme = \"different-theme\"");
+  if (!write(path, bytes) || !QTest::qWaitFor([] { return QIcon::themeName() == "different-theme"; })) {
+    return 11;
+  }
+  QIcon::setThemeName("ExplicitApplicationTheme");
+  bytes.replace("different-theme", "next-system-theme");
+  bytes.replace("fallback = \"live-test\"", "fallback = \"different-fallback\"");
+  if (!write(path, bytes) || !QTest::qWaitFor([] { return QIcon::fallbackThemeName() == "different-fallback"; })) {
+    return 12;
+  }
+  if (QIcon::themeName() != "ExplicitApplicationTheme") {
+    return 13;
+  }
+  return 0;
+}
 }  // namespace
 
 int main(int argc, char** argv) {
   QTemporaryDir directory;
   const auto path = directory.filePath("appearance.toml");
-  if (!write(path, appearance("holonight-dark", "blue"))) return 1;
+  if (!write(path, appearance("holonight-dark", "blue"))) {
+    return 1;
+  }
   qputenv("HOLONIGHT_APPEARANCE_FILE", path.toUtf8());
   QGuiApplication app(argc, argv);
   const auto theme = directory.filePath("live-test");
@@ -47,6 +143,10 @@ int main(int argc, char** argv) {
 </svg>)"))
     return 2;
   QIcon::setThemeSearchPaths({directory.path()});
+  if (QIcon::themeName() != "live-test" || !QIcon::hasThemeIcon("folder")) {
+    qCritical() << "Fixture theme unavailable" << QIcon::themeName() << QIcon::themeSearchPaths();
+    return 16;
+  }
   QQmlEngine engine;
   HolonightFileBrowser::initializeEngine(engine);
   QQmlComponent component(&engine);
@@ -57,6 +157,8 @@ import Holonight.FileBrowser
 Item {
   width: 320; height: 110
   property int revision: HnAppearance.revision
+  property bool imagesReady: icons.count === 3 && icons.itemAt(0).status === Image.Ready
+                            && icons.itemAt(1).status === Image.Ready && icons.itemAt(2).status === Image.Ready
   DirectoryListing {
     objectName: "listing"
     y: 40; width: 320; height: 70
@@ -68,6 +170,7 @@ Item {
   }
   // Requests share the same candidate chain at different physical sizes.
   Repeater {
+    id: icons
     model: 3
     Image {
       required property int index
@@ -89,61 +192,9 @@ Item {
   window.resize(320, 110);
   item->setParentItem(window.contentItem());
   window.show();
-  QImage previous;
-  for (const auto& selection : {qMakePair(QByteArray("holonight-dark"), QByteArray("blue")),
-                                qMakePair(QByteArray("holonight-mocha"), QByteArray("default")),
-                                qMakePair(QByteArray("holonight-mocha"), QByteArray("violet")),
-                                qMakePair(QByteArray("holonight-light"), QByteArray("blue")),
-                                qMakePair(QByteArray("holonight-dark"), QByteArray("blue")),
-                                qMakePair(QByteArray("holonight-mocha"), QByteArray("violet"))}) {
-    const auto revision = object->property("revision").toInt();
-    if (!write(path, appearance(selection.first, selection.second))) return 4;
-    if (!previous.isNull() && !QTest::qWaitFor([&] { return object->property("revision").toInt() > revision; }))
-      return 5;
-    QTest::qWait(150);
-    const auto image = window.grabWindow();
-    if (image.isNull()) return 6;
-    const auto body = image.pixelColor(8, 8);
-    if (body != QGuiApplication::palette().color(QPalette::Accent)) {
-      qCritical() << "Stale body" << selection << body << QGuiApplication::palette().color(QPalette::Accent);
-      return 7;
-    }
-    if (image.pixelColor(26, 6) != QGuiApplication::palette().color(QPalette::Text) ||
-        image.pixelColor(8, 24).lightnessF() >= body.lightnessF())
-      return 8;
-    for (int x : {40, 72})
-      if (image.pixelColor(x, 8) != body) return 9;
-    if (!previous.isNull() && previous == image) return 10;
-    auto* listing = object->findChild<QQuickItem*>("listing");
-    if (!listing || listing->property("selectedPaths").toStringList() != QStringList{"/kept"} ||
-        listing->property("currentIndex").toInt() != 0 || listing->property("count").toInt() != 1)
-      return 14;
-    bool checked = false;
-    auto inspect = [&](auto&& self, QQuickItem* parent) -> void {
-      for (auto* child : parent->childItems()) {
-        const auto source = child->property("source").toUrl().toString();
-        if (child->property("rendering").isValid() && source.startsWith("image://icon/")) {
-          const auto point = child->mapToScene({child->width() / 4, child->height() / 4}).toPoint();
-          checked = source.endsWith("?revision=" + object->property("revision").toString()) &&
-                    image.pixelColor(point) == body;
-        }
-        self(self, child);
-      }
-    };
-    inspect(inspect, listing);
-    if (!checked) return 15;
-    previous = image;
-  }
-  // Icon-only updates must reach Qt independently of palette changes.
-  auto bytes = appearance("holonight-mocha", "violet");
-  bytes.replace("theme = \"live-test\"", "theme = \"different-theme\"");
-  if (!write(path, bytes) || !QTest::qWaitFor([] { return QIcon::themeName() == "different-theme"; })) return 11;
-  QIcon::setThemeName("ExplicitApplicationTheme");
-  bytes.replace("different-theme", "next-system-theme");
-  bytes.replace("fallback = \"live-test\"", "fallback = \"different-fallback\"");
-  if (!write(path, bytes) || !QTest::qWaitFor([] { return QIcon::fallbackThemeName() == "different-fallback"; }))
-    return 12;
-  if (QIcon::themeName() != "ExplicitApplicationTheme") return 13;
+  // Platform-theme watchers attach through a queued startup call. Drain it before replacing the file.
+  QCoreApplication::processEvents();
+  const int result = checkTransitions(*object, window, path);
   item->setParentItem(nullptr);
-  return 0;
+  return result;
 }

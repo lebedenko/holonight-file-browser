@@ -19,7 +19,7 @@ endif()
 string(REPLACE ";" ":" qml_path "${PROVIDER_QML_PATH}")
 execute_process(COMMAND "${CMAKE_COMMAND}" -E env "QT_QPA_PLATFORM=offscreen" "QT_QUICK_BACKEND=software"
   "QML_IMPORT_PATH=${stage}/lib/qt6/qml:${qml_path}"
-  "LD_LIBRARY_PATH=${stage}/lib:$ENV{LD_LIBRARY_PATH}" "${build}/consumer"
+  "LD_LIBRARY_PATH=${stage}/lib:$ENV{LD_LIBRARY_PATH}" "${build}/consumer" "${TEST_RUNTIME}"
   RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
 if(result)
   message(FATAL_ERROR "Installed consumer runtime failed (${result}): ${output}${error}")
@@ -28,7 +28,10 @@ message(STATUS "Installed consumer passed (Quick=${QUICK})")
 
 if(QUICK)
   set(plugin_paths "")
-  foreach(prefix IN LISTS PROVIDER_PREFIX_PATH)
+  # CMake also searches the environment prefix; preserve it for Qt plugin discovery.
+  file(TO_CMAKE_PATH "$ENV{CMAKE_PREFIX_PATH}" environment_prefixes)
+  set(plugin_prefixes ${PROVIDER_PREFIX_PATH} ${environment_prefixes})
+  foreach(prefix IN LISTS plugin_prefixes)
     list(APPEND plugin_paths "${prefix}/lib/qt6/plugins")
   endforeach()
   string(REPLACE ";" ":" plugin_paths "${plugin_paths}")
