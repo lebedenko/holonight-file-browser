@@ -393,3 +393,30 @@ deadline. The instrumented packages pass all five focused isolation regressions
 and existing Files/chooser offscreen acceptance. Historical cleanup causes remain
 unresolved; no optimization is selected or implemented while Experiment 0 remains
 incomplete.
+
+## Corrected Experiment 0 control (2026-11-09)
+
+The unfinished scheduler requirement is superseded by A/B2: A remains frozen;
+B2 keeps File Browser `2f86c9b` and Thumbnails `9462bac` and consumes corrected
+Images cleanup. D2 applies diagnostic overlays to that same implementation.
+Original A/B latency, both historical failures, both subsequent recurrences, and
+the excluded homogeneous scheduler run remain unchanged historical evidence.
+
+The harness validates four copies of each frozen fixture, two configured threads
+and 256-pixel boxes before measurement and again when reporting batches. A shared
+private gate prevents decoder admission after a reported cleanup failure; already
+admitted work drains. Barrier tests cover that stop, cancellation before/after
+entry, warm cache hits without decoding, response lifetime and draining. No
+consumer production behavior, defaults, UI, or revision pins change. See the
+[benchmark correction note](../../../../tooling/preview-benchmark/README.md#corrected-cleanup-iteration-ab2-and-d2)
+and umbrella correction note for actual denominators and verification results.
+
+Iteration result: **corrected measurements remain incomplete**. An initial packaging
+error silently skipped the cleanup patch while reporting success. The resulting
+mislabeled lifecycle (1,000 cycles), attribution (280 samples), resources (84
+samples) and scheduler (50 attempted batches, one failed warm setup) are preserved
+and excluded from corrected evidence. The scheduler cleanup recurrence stopped
+measurement without retry or extra manager cleanup. The packaging regression is
+fixed and tested; new verified A/B2 and D2 packages were built, but were not measured
+again in this iteration. See the [umbrella audit](../../../../docs/initiatives/image-isolation.md#cleanup-observation-correction-and-excluded-iteration-2026-11-09) for artifact paths,
+denominators, the preserved failure, verification and remaining gaps.
