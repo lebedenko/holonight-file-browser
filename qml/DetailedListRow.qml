@@ -10,10 +10,20 @@ import Holonight.Controls
 HnListDelegate {
     id: root
     required property DetailedColumnLayout columns
+    property int rowIndex: -1
+    property int cursorIndex: -1
     property string filename: text
+    property string fileIconName
+    property bool isDirectory: false
+    property bool fileIsSymlink: false
     property string sizeText
     property string modifiedText
-    property Component gutterContent
+    property Component gutterContent: Component {
+        RelativeLineNumber {
+            rowIndex: root.rowIndex
+            cursorIndex: root.cursorIndex
+        }
+    }
     property Component selectionContent
     property Component filenameContent
     property Component editorContent
@@ -63,10 +73,25 @@ HnListDelegate {
     }
     Component {
         id: defaultName
-        HnLabel {
-            rawText: root.filename
-            elide: Text.ElideRight
-            Accessible.ignored: true
+        RowLayout {
+            spacing: root.columns.spacing
+            FileTypeIcon {
+                iconName: root.fileIconName
+                isDirectory: root.isDirectory
+                Layout.preferredWidth: 32
+                Layout.leftMargin: 8
+            }
+            HnLabel {
+                rawText: root.filename
+                elide: Text.ElideRight
+                font.bold: root.isDirectory && !root.fileIsSymlink
+                font.italic: root.fileIsSymlink
+                color: root.fileIsSymlink ? HoloniightPalette.textSecondary : HoloniightPalette.textPrimary
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Layout.rightMargin: 8
+                Accessible.ignored: true
+            }
         }
     }
 }

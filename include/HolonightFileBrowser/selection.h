@@ -29,13 +29,20 @@ class Selection {
     }
   }
   void range(const QList<QByteArray>& order, const QByteArray& identity, bool extend = false) {
-    auto first = order.indexOf(anchor);
+    auto first = anchor.isEmpty() ? -1 : order.indexOf(anchor);
     auto last = order.indexOf(identity);
     if (last < 0) {
       return;
     }
     if (first < 0) {
-      single(identity);
+      if (extend) {
+        current = anchor = identity;
+        if (!identity.isEmpty() && !selected.contains(identity)) {
+          selected.append(identity);
+        }
+      } else {
+        single(identity);
+      }
       return;
     }
     current = identity;
@@ -46,7 +53,7 @@ class Selection {
       std::swap(first, last);
     }
     for (auto row = first; row <= last; ++row) {
-      if (!selected.contains(order[row])) {
+      if (!order[row].isEmpty() && !selected.contains(order[row])) {
         selected.append(order[row]);
       }
     }

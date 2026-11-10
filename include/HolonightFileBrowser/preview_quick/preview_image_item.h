@@ -4,6 +4,15 @@
 #include <QQuickPaintedItem>
 #include <QtQml/qqmlregistration.h>
 
+#include <HolonightFileBrowser/preview/preview_service.h>
+
+struct BrowserPreviewServiceRegistration {
+  Q_GADGET
+  QML_FOREIGN(PreviewService)
+  QML_NAMED_ELEMENT(PreviewService)
+  QML_UNCREATABLE("Created by the consumer")
+};
+
 // A small QQuickPaintedItem, the same base class holonight-viewer's ImageCanvas uses: Qt Quick has
 // no built-in way to bind a QML Image element's source to a live, in-memory QImage that changes at
 // arbitrary times. Unlike ImageCanvas, PreviewImageItem has no pan/zoom/magnification state —

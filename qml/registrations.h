@@ -22,3 +22,10 @@ struct BreadcrumbAdapterRegistration {
   QML_FOREIGN(HolonightFileBrowser::BreadcrumbAdapter)
   QML_NAMED_ELEMENT(BreadcrumbAdapter)
 };
+
+#include <HolonightFileBrowser/selection_session.h>
+struct SelectionSessionRegistration {
+  Q_GADGET
+  QML_FOREIGN(HolonightFileBrowser::SelectionSession)
+  QML_NAMED_ELEMENT(SelectionSession)
+};

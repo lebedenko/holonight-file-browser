@@ -1,107 +1,443 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-
 pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls as Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import Holonight.Core
 import Holonight.Controls
 
-Controls.ScrollView {
+// Docked sidebar, with local thumbnail transition state and metadata bindings to
+// controller.preview. Shares its decoder and cached thumbnail data with QuickLookOverlay.qml —
+// both bind to the same controller.preview instance rather than owning a second pipeline.
+Item {
     id: root
-    contentWidth: availableWidth
-    clip: true
-    required property var service
+
+    required property PreviewService service
+    readonly property PreviewService preview: service
     property string iconProvider: "image://icon/"
-    // Formatting is deliberately supplied by the consumer.
+    property string folderFallback: "qrc:/qt/qml/Holonight/Controls/assets/folder.svg"
+    property string fileFallback: "qrc:/qt/qml/Holonight/Controls/assets/generic-file.svg"
     property var metadataRows: []
-    readonly property real previewDevicePixelRatio: Window.window ? Window.window.devicePixelRatio : 1
-    function reportSize(): void {
-        if (service && frame)
-            service.setRequestedSize(0, Qt.size(frame.width * previewDevicePixelRatio, frame.height * previewDevicePixelRatio));
+
+    // The image frame is a square derived from its own width, so its height never depends on the
+    // selected entry and the metadata below does not jump as the selection changes.
+    readonly property real previewDevicePixelRatio: root.Window.window ? root.Window.window.devicePixelRatio : 1
+
+    function reportImageAreaSize(): void {
+        const ratio = root.previewDevicePixelRatio;
+        root.preview.setRequestedSize(PreviewService.PreviewConsumer.Pane, Qt.size(imageArea.width * ratio, imageArea.frameHeight * ratio));
     }
-    onPreviewDevicePixelRatioChanged: reportSize()
-    onServiceChanged: reportSize()
-    ColumnLayout {
-        width: root.availableWidth
-        HnPreviewFrame {
-            id: frame
-            objectName: "filePreviewFrame"
-            onWidthChanged: root.reportSize()
-            onHeightChanged: root.reportSize()
-            Layout.fillWidth: true
-            Layout.preferredHeight: Math.max(160, width * 0.75)
-            previewState: !root.service || !root.service.hasEntry ? HnPreviewFrame.Empty : root.service.hasImage ? HnPreviewFrame.Content : root.service.busy ? HnPreviewFrame.Loading : root.service.previewErrorMessage.length ? HnPreviewFrame.Error : HnPreviewFrame.Content
-            previewContent: Item {
+
+    property bool fallbackDelayElapsed: false
+    property string displayedFallbackIdentity
+    property bool fallbackDisplayed: false
+    property var displayedImage: undefined
+    readonly property bool showIconFallback: root.preview.hasEntry && !root.preview.hasImage && (!root.preview.busy || root.preview.previewErrorKind !== PreviewService.PreviewErrorKind.None || root.fallbackDelayElapsed || (root.fallbackDisplayed && root.displayedFallbackIdentity === root.preview.iconName))
+
+    function discardThumbnail(): void {
+        thumbnailFade.stop();
+        root.displayedImage = undefined;
+        thumbnail.opacity = 1;
+    }
+
+    function updateThumbnail(): void {
+        if (!root.visible || !root.preview.hasEntry || root.preview.hasImage) {
+            root.fallbackDisplayed = false;
+            root.displayedFallbackIdentity = "";
+        } else if (!root.preview.busy || root.preview.previewErrorKind !== PreviewService.PreviewErrorKind.None || root.fallbackDelayElapsed || (root.fallbackDisplayed && root.displayedFallbackIdentity === root.preview.iconName)) {
+            root.displayedFallbackIdentity = root.preview.iconName;
+            root.fallbackDisplayed = true;
+        }
+        if (!root.visible || !root.preview.hasEntry || (!root.preview.hasImage && root.preview.previewErrorKind !== PreviewService.PreviewErrorKind.None)) {
+            root.discardThumbnail();
+        } else if (root.preview.hasImage) {
+            root.discardThumbnail();
+            root.displayedImage = root.preview.image;
+        } else if (!root.preview.busy || root.fallbackDelayElapsed) {
+            root.discardThumbnail();
+        }
+    }
+
+    NumberAnimation {
+        id: thumbnailFade
+        objectName: "previewThumbnailFade"
+        target: thumbnail
+        property: "opacity"
+        to: 0
+        duration: 120
+        easing.type: Easing.InQuad
+        onFinished: root.discardThumbnail()
+    }
+
+    function resetFallbackDelay(): void {
+        fallbackDelay.stop();
+        root.fallbackDelayElapsed = false;
+        if (root.visible && root.preview.busy && !root.preview.hasImage)
+            fallbackDelay.start();
+    }
+
+    Timer {
+        id: fallbackDelay
+        objectName: "previewFallbackDelay"
+        interval: 150
+        onTriggered: {
+            root.fallbackDelayElapsed = true;
+            root.updateThumbnail();
+        }
+    }
+
+    Connections {
+        target: root.preview
+        function onSelectionChanged(): void {
+            scrollArea.contentY = 0;
+            if (!root.preview.hasEntry || root.displayedFallbackIdentity !== root.preview.iconName)
+                root.fallbackDisplayed = false;
+            root.resetFallbackDelay();
+            root.updateThumbnail();
+            if (root.displayedImage !== undefined && !root.preview.hasImage && !thumbnailFade.running)
+                thumbnailFade.start();
+        }
+        function onChanged(): void {
+            root.updateThumbnail();
+        }
+    }
+
+    Component.onCompleted: {
+        root.reportImageAreaSize();
+        root.resetFallbackDelay();
+        root.updateThumbnail();
+    }
+    onVisibleChanged: {
+        root.resetFallbackDelay();
+        root.updateThumbnail();
+    }
+    onPreviewDevicePixelRatioChanged: root.reportImageAreaSize()
+
+    function formatModified(value): string {
+        if (!value || isNaN(value.getTime()))
+            return qsTr("Unavailable");
+        return value.toLocaleString(Qt.locale(), Locale.ShortFormat) || value.toISOString();
+    }
+
+    // Row values; an empty string hides the row entirely (SPEC.md REQ-F-008/012).
+    readonly property string sizeText: root.preview.mimeType === "inode/directory" ? qsTr("Dir") : HnFormat.formatSize(root.preview.size)
+    readonly property string dimensionsText: root.preview.documentSize.width > 0 && root.preview.documentSize.height > 0 ? qsTr("%1 \u00d7 %2").arg(root.preview.documentSize.width).arg(root.preview.documentSize.height) : ""
+    // formatModified()'s "Unavailable" sentinel hides the row rather than rendering (DESIGN.md
+    // conflict item 1).
+    readonly property string modifiedText: {
+        const formatted = root.formatModified(root.preview.modified);
+        return formatted === qsTr("Unavailable") ? "" : formatted;
+    }
+    readonly property string cameraText: [root.preview.exifMake, root.preview.exifModel].filter(part => part.length > 0).join(" ")
+
+    // Measured over every label in both tables, so the label column neither differs between the
+    // tables nor reflows as rows hide between selections.
+    readonly property real labelColumnWidth: {
+        let widest = 0;
+        for (let i = 0; i < labelMetrics.children.length; ++i)
+            widest = Math.max(widest, labelMetrics.children[i].implicitWidth);
+        return Math.min(Math.ceil(widest), Math.max(0, root.width * 0.4));
+    }
+
+    Column {
+        id: labelMetrics
+        visible: false
+
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("Size")
+        }
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("Dimensions")
+        }
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("Modified")
+        }
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("Camera")
+        }
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("Lens")
+        }
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("Aperture")
+        }
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("Exposure")
+        }
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("ISO")
+        }
+        HnLabel {
+            role: HnTypographyRole.Caption
+            rawText: qsTr("Focal length")
+        }
+    }
+
+    Flickable {
+        id: scrollArea
+        objectName: "previewScrollArea"
+        anchors.fill: parent
+        anchors.margins: HnMetrics.internalSpacing(HnControlSize.Normal)
+        visible: root.preview.hasEntry
+        clip: true
+        contentWidth: width
+        contentHeight: content.implicitHeight
+        flickableDirection: Flickable.VerticalFlick
+        boundsBehavior: Flickable.StopAtBounds
+
+        readonly property string entryPath: root.preview.name
+        onEntryPathChanged: contentY = 0
+
+        Controls.ScrollBar.vertical: Controls.ScrollBar {
+            parent: root
+            anchors.right: parent.right
+            anchors.top: scrollArea.top
+            anchors.bottom: scrollArea.bottom
+        }
+
+        ColumnLayout {
+            id: content
+            width: scrollArea.width
+            spacing: HnMetrics.internalSpacing(HnControlSize.Normal)
+
+            HnPreviewFrame {
+                id: imageArea
+                padding: 0
+                previewState: HnPreviewFrame.Content
+                objectName: "previewImageArea"
+                // Always square, whatever the entry: PreviewImageItem aspect-fits and centers the
+                // thumbnail inside it, so it spans the full width or the full height.
+                readonly property real frameHeight: Math.round(width)
+
+                Layout.fillWidth: true
+                Layout.preferredHeight: frameHeight
+                // Reserved for every entry: a thumbnail when one exists, otherwise the listing's icon
+                // (SPEC.md REQ-F-012/013).
+                visible: root.preview.hasEntry
+                onWidthChanged: root.reportImageAreaSize()
+
+                // Icons sit inside a 16 px inset and are drawn at the full inset extent, rendered from
+                // the largest standard theme size that fits in it (the theme falls back to its next
+                // smaller size when it lacks that one) and scaled up from there.
+                readonly property int iconExtent: Math.max(0, Math.floor(width) - 32)
+                readonly property int iconSourceSize: {
+                    const standardSizes = [512, 256, 128, 96, 64, 48, 32, 24, 22, 16];
+                    for (const candidate of standardSizes) {
+                        if (candidate <= iconExtent)
+                            return candidate;
+                    }
+                    return Math.max(1, iconExtent);
+                }
+                // Re-read whenever the selected chain changes; a chain the listing already failed is not
+                // requested again (IconFallbacks).
+                readonly property bool knownUnresolved: false
+                // Pinned on failure so a resize (new sourceSize) does not re-request a known miss.
+                property string failedChain
+                readonly property bool skipRequest: knownUnresolved || failedChain === root.preview.iconName
+                readonly property bool showFallback: skipRequest || previewThemeIcon.hasError
+                // A named folder's chain begins with its place icon, so the glyph follows the entry kind, not the name.
+                readonly property bool isFolderEntry: root.preview.isDirectory
+
                 PreviewImageItem {
+                    id: thumbnail
+                    objectName: "previewThumbnail"
                     anchors.fill: parent
-                    visible: root.service && root.service.hasImage
-                    image: root.service ? root.service.image : null
+                    image: root.displayedImage !== undefined ? root.displayedImage : root.preview.image
+                    visible: root.preview.hasImage || root.displayedImage !== undefined
+                    radius: HnAppearance.roundedRadius(HnSurfaceRole.Card, width, height, HnAppearance.revision)
                 }
                 HnIcon {
-                    id: contentIcon
+                    id: previewThemeIcon
+                    objectName: "previewThemeIcon"
                     anchors.centerIn: parent
-                    size: 64
-                    visible: root.service && !root.service.hasImage
-                    source: root.service ? root.iconProvider + root.service.iconName + (root.iconProvider === "image://icon/" ? "?revision=" + HnAppearance.revision : "") : ""
+                    width: imageArea.iconExtent
+                    height: imageArea.iconExtent
+                    size: imageArea.iconSourceSize
+                    source: !root.preview.hasEntry || root.preview.hasImage || imageArea.skipRequest ? "" : root.iconProvider + root.preview.iconName + "?revision=" + HnAppearance.revision
                     rendering: HnIcon.Original
+                    visible: root.showIconFallback && !imageArea.showFallback
+                    onHasErrorChanged: if (hasError) {
+                        const chain = root.preview.iconName;
+                        // Deferred: the failure is reported from inside the source assignment itself.
+                        Qt.callLater(() => imageArea.failedChain = chain);
+                    }
                 }
                 HnIcon {
+                    id: previewFallbackIcon
+                    objectName: "previewFallbackIcon"
                     anchors.centerIn: parent
-                    size: 64
-                    visible: contentIcon.visible && contentIcon.hasError
-                    source: "qrc:/qt/qml/Holonight/Controls/assets/generic-file.svg"
+                    width: imageArea.iconExtent
+                    height: imageArea.iconExtent
+                    size: imageArea.iconExtent
+                    source: root.preview.hasImage || !imageArea.showFallback ? "" : imageArea.isFolderEntry ? root.folderFallback : root.fileFallback
+                    visible: root.showIconFallback && imageArea.showFallback
                 }
-            }
-            loadingContent: Item {
                 Controls.BusyIndicator {
+                    objectName: "previewBusy"
                     anchors.centerIn: parent
-                    running: true
+                    visible: root.preview.busy && !root.preview.hasImage && root.displayedImage === undefined && !root.showIconFallback
+                    running: visible
                     Accessible.name: qsTr("Loading preview")
                 }
-            }
-            errorContent: Item {
-                Accessible.name: qsTr("No preview available")
-                Accessible.description: root.service ? root.service.previewErrorMessage : ""
-                HoverHandler {
-                    id: failureHover
-                }
-                Controls.ToolTip.visible: failureHover.hovered
-                Controls.ToolTip.text: root.service ? root.service.previewErrorMessage : ""
-                ColumnLayout {
+                Rectangle {
+                    objectName: "previewIconFailurePlaceholder"
                     anchors.centerIn: parent
-                    width: parent.width
-                    HnIcon {
-                        id: errorIcon
-                        objectName: "filePreviewErrorIcon"
-                        Layout.alignment: Qt.AlignHCenter
-                        size: 64
-                        source: root.service ? root.iconProvider + root.service.iconName + (root.iconProvider === "image://icon/" ? "?revision=" + HnAppearance.revision : "") : ""
-                        rendering: HnIcon.Original
-                        visible: !hasError
-                    }
-                    HnIcon {
-                        Layout.alignment: Qt.AlignHCenter
-                        size: 64
-                        objectName: "filePreviewFallbackIcon"
-                        visible: errorIcon.hasError
-                        source: "qrc:/qt/qml/Holonight/Controls/assets/generic-file.svg"
-                    }
-                    HnLabel {
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.Wrap
-                        role: HnTypographyRole.Caption
+                    width: imageArea.iconExtent
+                    height: imageArea.iconExtent
+                    radius: 8
+                    color: "transparent"
+                    border.color: HoloniightPalette.textMuted
+                    visible: root.showIconFallback && imageArea.showFallback && previewFallbackIcon.hasError
+                    Text {
+                        anchors.centerIn: parent
+                        text: "?"
                         color: HoloniightPalette.textMuted
-                        objectName: "filePreviewFailureCaption"
-                        rawText: qsTr("No preview available")
+                        font.pixelSize: Math.min(64, imageArea.iconExtent * 0.6)
                     }
                 }
             }
-        }
-        HnMetadataList {
-            Layout.fillWidth: true
-            rows: root.metadataRows
+
+            HnLabel {
+                objectName: "previewErrorNotice"
+                Layout.fillWidth: true
+                role: HnTypographyRole.Caption
+                color: HoloniightPalette.textMuted
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                rawText: qsTr("No preview available")
+                visible: !root.preview.hasImage && !root.preview.busy && root.preview.previewErrorKind !== PreviewService.PreviewErrorKind.None
+                Accessible.description: root.preview.previewErrorMessage
+                HoverHandler {
+                    id: previewFailureHover
+                }
+                Controls.ToolTip.visible: previewFailureHover.hovered
+                Controls.ToolTip.text: root.preview.previewErrorMessage
+            }
+
+            HnLabel {
+                objectName: "previewFileName"
+                role: HnTypographyRole.Subheading
+                font.bold: true
+                color: HoloniightPalette.textPrimary
+                rawText: root.preview.name
+                elide: Text.ElideMiddle
+                Layout.fillWidth: true
+            }
+
+            HnLabel {
+                objectName: "previewTypeDescription"
+                role: HnTypographyRole.Caption
+                color: HoloniightPalette.textMuted
+                rawText: root.preview.mimeTypeDescription
+                visible: text.length > 0
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                Layout.topMargin: -HnMetrics.internalSpacing(HnControlSize.Normal) / 2
+            }
+
+            HnMetadataList {
+                objectName: "previewMetadataTable"
+                labelWidth: root.labelColumnWidth
+                spacing: 2
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Layout.preferredWidth: 0
+                rows: [
+                    {
+                        label: qsTr("Size"),
+                        value: root.sizeText,
+                        objectName: "previewSizeValue"
+                    },
+                    {
+                        label: qsTr("Dimensions"),
+                        value: root.dimensionsText,
+                        objectName: "previewDimensionsValue"
+                    },
+                    {
+                        label: qsTr("Modified"),
+                        value: root.modifiedText,
+                        objectName: "previewModifiedValue"
+                    }
+                ].map(row => Object.assign({}, row, {
+                        visible: row.value.length > 0
+                    }))
+            }
+
+            // The separator belongs to the EXIF section and hides with it, so non-EXIF entries do not
+            // end in a dangling rule (DESIGN.md conflict item 2).
+            HnSeparator {
+                Layout.fillWidth: true
+                color: HoloniightPalette.borderPassive
+                visible: root.preview.exifPresent
+            }
+
+            HnLabel {
+                objectName: "previewExifHeader"
+                role: HnTypographyRole.Body
+                font.bold: true
+                color: HoloniightPalette.textPrimary
+                rawText: qsTr("EXIF")
+                visible: root.preview.exifPresent
+                Layout.fillWidth: true
+            }
+
+            HnMetadataList {
+                objectName: "previewExifTable"
+                labelWidth: root.labelColumnWidth
+                spacing: 2
+                Layout.fillWidth: true
+                visible: root.preview.exifPresent
+                rows: [
+                    {
+                        label: qsTr("Camera"),
+                        value: root.cameraText,
+                        objectName: "previewCameraValue"
+                    },
+                    {
+                        label: qsTr("Lens"),
+                        value: root.preview.exifLensModel,
+                        objectName: "previewLensValue"
+                    },
+                    {
+                        label: qsTr("Aperture"),
+                        value: root.preview.exifAperture,
+                        objectName: "previewApertureValue"
+                    },
+                    {
+                        label: qsTr("Exposure"),
+                        value: root.preview.exifExposureTime,
+                        objectName: "previewExposureValue"
+                    },
+                    {
+                        label: qsTr("ISO"),
+                        value: root.preview.exifIso,
+                        objectName: "previewIsoValue"
+                    },
+                    {
+                        label: qsTr("Focal length"),
+                        value: root.preview.exifFocalLength,
+                        objectName: "previewFocalLengthValue"
+                    }
+                ].map(row => Object.assign({}, row, {
+                        visible: row.value.length > 0
+                    }))
+            }
+            HnMetadataList {
+                Layout.fillWidth: true
+                visible: root.metadataRows.length > 0
+                labelWidth: root.labelColumnWidth
+                rows: root.metadataRows
+            }
         }
     }
 }
