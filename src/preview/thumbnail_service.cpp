@@ -117,6 +117,21 @@ std::optional<Result> lookup(QFile& file, const QString& path, const QString& re
   return cached.image ? std::optional<Result>{Result{std::move(*cached.image), Outcome::Success}} : std::nullopt;
 }
 
+std::optional<Result> lookup(QFile& file, const QString& path, const QString& revision, Tier selected, QSize required,
+                             HolonightImages::SourceTransaction& transaction, const std::atomic_bool& cancelled,
+                             const StageCallback& stage, const QByteArray& nativePath) {
+  auto image = HolonightThumbnails::lookupIsolated(
+      cacheRequest(file, path, revision, required, ImageKind::Raster, selected, nativePath), transaction, cancelled,
+      cacheStage(stage));
+  return image ? std::optional<Result>{Result{std::move(*image), Outcome::Success}} : std::nullopt;
+}
+void storeRaster(QFile& file, const QString& path, const QString& revision, Tier tier, QSize required,
+                 const QImage& image, const std::atomic_bool& cancelled, const StageCallback& stage,
+                 const QByteArray& nativePath) {
+  HolonightThumbnails::store(cacheRequest(file, path, revision, required, ImageKind::Raster, tier, nativePath), image,
+                             cancelled, cacheStage(stage));
+}
+
 Result renderSvg(QFile& file, const QString& path, const QString& revision, const QByteArray& bytes, QSize bound,
                  std::optional<Tier> tier, const std::atomic_bool& cancelled, const StageCallback& stage,
                  const QByteArray& nativePath) {

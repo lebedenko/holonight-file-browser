@@ -269,6 +269,54 @@ TEST_F(WarmPreview, RevisitPreservesOrientedDimensionsMetadataAndProgressivePixe
   EXPECT_EQ(fresh.previewErrorKind(), PreviewService::PreviewErrorKind::RuntimeUnavailable);
 }
 
+TEST_F(WarmPreview, DiskHitKeepsSourceExifOrientationAndNotificationOrder) {
+  const auto path = directory.filePath("disk-oriented.jpg");
+  ASSERT_TRUE(QFile::copy(QDir(QString::fromUtf8(BROWSER_TEST_FIXTURES)).filePath("sample.jpg"), path));
+  QFile fixture(path);
+  ASSERT_TRUE(fixture.open(QIODevice::ReadWrite));
+  auto bytes = fixture.readAll();
+  const auto oldExif = QByteArray::fromHex("ffe1002245786966000049492a0008000000010012010300010000000600000000000000");
+  const auto newExif = QByteArray::fromHex(
+      "ffe1002e45786966000049492a000800000002001201030001000000060000000f0102000400000043616d0000000000");
+  ASSERT_TRUE(bytes.contains(oldExif));
+  bytes.replace(oldExif, newExif);
+  ASSERT_TRUE(fixture.resize(0));
+  ASSERT_EQ(fixture.write(bytes), bytes.size());
+  fixture.close();
+  QImage expected;
+  QSize sourceSize;
+  {
+    PreviewService seed({runtime});
+    select(seed, path);
+    ASSERT_TRUE(seed.hasImage());
+    ASSERT_EQ(seed.exifMake(), "Cam");
+    expected = seed.image();
+    sourceSize = seed.sourcePixelSize();
+    seed.shutdown();
+  }
+  int cacheDecodes = 0;
+  int sourceDecodes = 0;
+  PreviewService service({runtime});
+  PreviewServiceTestAccess::stage(service, [&](ThumbnailService::Stage stage) {
+    cacheDecodes += stage == ThumbnailService::Stage::CacheDecode;
+    sourceDecodes += stage == ThumbnailService::Stage::OriginalDecode;
+  });
+  bool pixelsBeforeMetadata = false;
+  QObject::connect(&service, &PreviewService::changed, &service, [&] {
+    if (service.hasImage() && service.busy() && service.exifMake().isEmpty()) {
+      pixelsBeforeMetadata = true;
+    }
+  });
+  select(service, path);
+  EXPECT_EQ(cacheDecodes, 1);
+  EXPECT_EQ(sourceDecodes, 0);
+  EXPECT_EQ(service.image(), expected);
+  EXPECT_EQ(service.sourcePixelSize(), sourceSize);
+  EXPECT_EQ(service.exifMake(), "Cam");
+  EXPECT_TRUE(pixelsBeforeMetadata);
+  service.shutdown();
+}
+
 TEST_F(WarmPreview, ResolutionUpgradeAndEvictionStillRequireRuntime) {
   const auto first = makeImage("first.png", {1600, 1200});
   const auto second = makeImage("second.png");

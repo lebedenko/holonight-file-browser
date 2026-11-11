@@ -223,72 +223,67 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
     }
     identity = sourceIdentity(current);
   }
-  const auto reply = HolonightImages::IsolatedClient(options.directory)
-                         .inspect(file, kPreviewImageLimits, *cancel, HolonightImages::OrientationPolicy::Apply, true);
+  std::optional<ThumbnailService::Tier> tier;
+  QSize needed;
+  bool decodedSource = false;
+  const auto reply =
+      HolonightImages::IsolatedClient(options.directory)
+          .sourceTransaction(
+              file, kPreviewImageLimits, *cancel,
+              [&](const HolonightImages::Inspection& inspection, HolonightImages::SourceTransaction& transaction) {
+                HolonightImages::DecodeResult selected;
+                selected.outcome = inspection.outcome;
+                if (inspection.outcome != HolonightImages::Outcome::Success || cancel->load()) {
+                  return selected;
+                }
+                needed = ThumbnailService::requiredSize(inspection.orientedSize, requestedSize);
+                tier = inspection.orientedSize.isValid() && !inspection.orientedSize.isEmpty()
+                           ? ThumbnailService::tierForSize(needed)
+                           : std::nullopt;
+                selected.image = cache.lookup(identity, needed);
+                if (selected.image.isNull() && tier) {
+                  auto cached = ThumbnailService::lookup(file, path, identity, *tier, needed, transaction, *cancel,
+                                                         stage, nativePath);
+                  if (cached) {
+                    selected.image = std::move(cached->image);
+                  }
+                }
+                if (!selected.image.isNull() || cancel->load()) {
+                  return selected;
+                }
+                if (beforeFullDecode) {
+                  beforeFullDecode();
+                }
+                if (cancel->load()) {
+                  return selected;
+                }
+                const auto bound = tier ? QSize(static_cast<int>(*tier), static_cast<int>(*tier)) : requestedSize;
+                if (stage) {
+                  stage(ThumbnailService::Stage::OriginalDecode);
+                }
+                selected = transaction.decodeSource({.limits = kPreviewImageLimits, .bound = bound});
+                decodedSource = true;
+                if (stage) {
+                  stage(ThumbnailService::Stage::OriginalDecoded);
+                }
+                return selected;
+              });
   result.runtime = reply.runtime;
   result.diagnostic = reply.diagnostic;
-  if (reply.runtime != HolonightImages::RuntimeStatus::Success) {
+  if (reply.runtime != HolonightImages::RuntimeStatus::Success || !reply.result) {
     return result;
   }
-  const auto& inspection = *reply.result;
-  result.raster_outcome = inspection.outcome;
-  if (inspection.outcome != HolonightImages::Outcome::Success || cancel->load()) {
-    return result;
-  }
+  const auto& inspection = reply.result->inspection;
+  result.raster_outcome = reply.result->outcome;
   result.source_pixel_size = inspection.orientedSize;
   result.document_size = inspection.orientedSize;
-  const auto needed = ThumbnailService::requiredSize(result.source_pixel_size, requestedSize);
-  const auto tier = result.source_pixel_size.isValid() && !result.source_pixel_size.isEmpty()
-                        ? ThumbnailService::tierForSize(needed)
-                        : std::nullopt;
-  result.image = cache.lookup(identity, needed);
-  if (result.image.isNull() && tier) {
-    const auto cached = ThumbnailService::lookup(file, path, identity, *tier, needed, *cancel, stage,
-                                                 ThumbnailService::ImageKind::Raster, nativePath, options);
-    if (cached) {
-      result.image = cached->image;
-      result.raster_outcome = cached->outcome;
-      result.runtime = cached->runtime;
-      result.diagnostic = cached->diagnostic;
-      if (result.runtime != HolonightImages::RuntimeStatus::Success) {
-        return result;
-      }
-    }
-  }
-  if (cancel->load()) {
+  result.image = reply.result->image;
+  if (cancel->load() || result.image.isNull()) {
     return result;
   }
-  if (result.raster_outcome == HolonightImages::Outcome::Cancelled) {
-    return result;
-  }
-  if (!result.image.isNull()) {
-    result.raster_outcome = HolonightImages::Outcome::Success;
-  }
-  if (result.image.isNull()) {
-    if (beforeFullDecode) {
-      beforeFullDecode();
-    }
-    if (cancel->load()) {
-      return result;
-    }
-    // The provider fits the source to this bound. Fitting an already rounded
-    // `needed` size again can lose a pixel and cause endless adequacy upgrades.
-    auto decoded = tier ? ThumbnailService::lookupOrDecode(file, path, identity, *tier, needed, *cancel, stage,
-                                                           nativePath, options)
-                        : ThumbnailService::decodeScaled(file, requestedSize, *cancel, stage, options);
-    result.image = std::move(decoded.image);
-    result.raster_outcome = decoded.outcome;
-    result.runtime = decoded.runtime;
-    result.diagnostic = decoded.diagnostic;
-    if (result.runtime != HolonightImages::RuntimeStatus::Success) {
-      return result;
-    }
-  }
-  if (cancel->load()) {
-    return result;
-  }
-  if (result.image.isNull()) {
-    return result;
+  if (decodedSource && tier && result.raster_outcome == HolonightImages::Outcome::Success &&
+      unchangedSource(file, identity)) {
+    ThumbnailService::storeRaster(file, path, identity, *tier, needed, result.image, *cancel, stage, nativePath);
   }
   if (cancel->load()) {
     return result;

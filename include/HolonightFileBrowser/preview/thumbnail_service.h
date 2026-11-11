@@ -43,6 +43,12 @@ std::optional<Result> lookup(QFile& file, const QString& path, const QString& re
                              const std::atomic_bool& cancelled, const StageCallback& stage = {},
                              ImageKind kind = ImageKind::Raster, const QByteArray& nativePath = {},
                              const ImageRuntimeOptions& options = HolonightFileBrowser::defaultImageRuntimeOptions());
+std::optional<Result> lookup(QFile& file, const QString& path, const QString& revision, Tier selected, QSize required,
+                             HolonightImages::SourceTransaction& transaction, const std::atomic_bool& cancelled,
+                             const StageCallback& stage = {}, const QByteArray& nativePath = {});
+void storeRaster(QFile& file, const QString& path, const QString& revision, Tier tier, QSize required,
+                 const QImage& image, const std::atomic_bool& cancelled, const StageCallback& stage,
+                 const QByteArray& nativePath);
 Result renderSvg(QFile& file, const QString& path, const QString& revision, const QByteArray& bytes, QSize bound,
                  std::optional<Tier> tier, const std::atomic_bool& cancelled, const StageCallback& stage = {},
                  const QByteArray& nativePath = {});
