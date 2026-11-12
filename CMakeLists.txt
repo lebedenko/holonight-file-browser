@@ -83,7 +83,7 @@ if(BUILD_FILE_BROWSER_PREVIEW)
   endif()
   set(HOLONIGHT_FILE_BROWSER_IMAGE_RUNTIME "${CMAKE_INSTALL_FULL_LIBEXECDIR}/holonight-images/runtime" CACHE PATH "Installed Images runtime directory (never DESTDIR)")
   browser_component(Preview preview
-    src/preview/runtime_options.cpp src/preview/exif_reader.cpp src/preview/preview_service.cpp src/preview/text_line_model.cpp
+    src/preview/runtime_options.cpp src/preview/exif_reader.cpp src/preview/preview_service.cpp src/preview/session_pool.cpp src/preview/text_line_model.cpp
     src/preview/text_lines.cpp src/preview/text_preview_service.cpp src/preview/thumbnail_service.cpp
     src/preview/thumbnail_cache.cpp src/preview/thumbnail_decoder.cpp src/preview/svg_helper.cpp
     include/HolonightFileBrowser/preview/preview_service.h include/HolonightFileBrowser/preview/text_line_model.h)

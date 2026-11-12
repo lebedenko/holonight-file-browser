@@ -35,3 +35,10 @@ commands and toolbar controls. `entryIdentity()` preserves the `entry:` prefix a
 path bytes. The former parent field, role and synthetic-entry helper are removed;
 remaining role numbers are unchanged. Rebuild Files, Viewer and the portal together
 against the updated installed provider; this API removal has no compatibility shim.
+
+Raster preview scheduling uses two independently threaded session slots, one active
+transaction and the latest pending selection. Adequate memory hits remain available
+during decoding and retirement. Protected runtime generations support worker reuse;
+mutable development prefixes keep fully validated one-shot execution. See the
+[responsive preview contract and qualification](docs/sdd/responsive-previews/DESIGN.md)
+for cancellation, refresh, recycling and resource bounds.

@@ -505,3 +505,51 @@ TEST_F(WarmPreview, CancelledAcquisitionDoesNotPopulateMemory) {
   select(service, path);
   EXPECT_EQ(service.previewErrorKind(), PreviewService::PreviewErrorKind::RuntimeUnavailable);
 }
+
+TEST_F(WarmPreview, MemoryHitDeliversWhileSupersededDecodeIsBlocked) {
+  const auto warm = makeImage("warm.png", {80, 40}, Qt::red);
+  const auto slow = makeImage("slow.png", {80, 40}, Qt::blue);
+  PreviewService service({runtime});
+  select(service, warm);
+  ASSERT_TRUE(service.hasImage());
+  QSemaphore reached;
+  QSemaphore release;
+  const auto unblock = qScopeGuard([&] {
+    release.release();
+    service.shutdown();
+  });
+  PreviewServiceTestAccess::stage(service, [&](ThumbnailService::Stage stage) {
+    if (stage == ThumbnailService::Stage::OriginalDecode) {
+      reached.release();
+      release.acquire();
+    }
+  });
+  service.setTarget(slow, false, 0, {}, S_IFREG | 0600, false, {});
+  ASSERT_TRUE(QTest::qWaitFor([&] { return reached.available() != 0; }));
+  service.setTarget(warm, false, 0, {}, S_IFREG | 0600, false, {});
+  ASSERT_TRUE(QTest::qWaitFor([&] { return !service.busy(); }));
+  ASSERT_TRUE(service.hasImage());
+  EXPECT_EQ(service.image().pixelColor(0, 0), QColor(Qt::red));
+}
+
+TEST(ProtectedPreview, RepeatedSelectionsReuseWorkersAndPreservePixels) {
+  const auto runtime = qEnvironmentVariable("HN_BROWSER_SESSION_RUNTIME");
+  if (runtime.isEmpty()) {
+    GTEST_SKIP() << "explicit protected native generation required";
+  }
+  QTemporaryDir directory;
+  ASSERT_TRUE(directory.isValid());
+  PreviewService service({runtime});
+  for (int number = 0; number < 36; ++number) {
+    const auto path = directory.filePath(QString("image-%1.png").arg(number));
+    QImage image(80, 40, QImage::Format_RGB32);
+    const auto color = number % 2 != 0 ? QColor(Qt::blue) : QColor(Qt::red);
+    image.fill(color);
+    ASSERT_TRUE(image.save(path));
+    service.setTarget(path, false, 0, {}, S_IFREG | 0600, false, {});
+    ASSERT_TRUE(QTest::qWaitFor([&] { return !service.busy(); }));
+    ASSERT_TRUE(service.hasImage()) << service.previewErrorMessage().toStdString();
+    EXPECT_EQ(service.image().pixelColor(0, 0), color);
+  }
+  service.shutdown();
+}

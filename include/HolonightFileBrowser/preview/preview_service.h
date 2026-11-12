@@ -24,6 +24,7 @@
 // only PreviewService's own dispatch()/applyResult() ever construct or inspect one.
 struct PreviewResult;
 struct PreviewWorkerCache;
+class PreviewSessionPool;
 
 // The async engine and the single QML-facing object for everything Stage 2 adds. Owned as a
 // value member of DirectoryController, structurally mirroring DirectoryModel: one persistent
@@ -176,6 +177,7 @@ class PreviewService : public QObject {
   Q_INVOKABLE void setRequestedSize(PreviewConsumer consumer, QSize pixels);
   void setQuickLookActive(bool active);  // REQ-F-004/005, called by both QML consumers
   void shutdown();
+  void refreshRuntime();
 
  signals:
   // Emitted before changed() for a new target/revision or clear, never for a size upgrade.
@@ -213,6 +215,8 @@ class PreviewService : public QObject {
   std::function<void()> before_full_decode_for_test_;
   std::function<void()> memory_lookup_for_test_;
   std::shared_ptr<PreviewWorkerCache> cache_;
+  std::unique_ptr<PreviewSessionPool> sessions_;
+  std::atomic_bool runtime_ready_for_test_{false};
   bool active_job_ = false;
   bool pending_job_ = false;
 

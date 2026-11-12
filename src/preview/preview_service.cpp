@@ -1,3 +1,5 @@
+#include "session_pool.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -12,6 +14,7 @@
 #include <fcntl.h>
 #include <holonight_images/svg.h>
 #include <list>
+#include <mutex>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -22,6 +25,7 @@ struct PreviewResult {
   QString diagnostic;
   quint64 generation = 0;
   bool final = true;
+  bool deferred = false;
   QString mime_type;
   QString mime_type_description;
   // MIME used only for Quick Look gating: the sniffed type, or an extension-only guess when the file
@@ -51,7 +55,9 @@ struct PreviewWorkerCache {
   };
   std::list<Entry> entries;
   qint64 bytes = 0;
+  mutable std::mutex mutex;
   QImage lookup(const QString& key, QSize size) {
+    const std::scoped_lock lock(mutex);
     for (auto it = entries.begin(); it != entries.end(); ++it) {
       if (it->key == key && it->image.width() >= size.width() && it->image.height() >= size.height()) {
         auto image = it->image;
@@ -61,19 +67,27 @@ struct PreviewWorkerCache {
     }
     return {};
   }
-  [[nodiscard]] std::optional<Entry> rasterCandidate(const QString& key, QSize bound) const {
-    for (const auto& entry : entries) {
+  [[nodiscard]] std::optional<Entry> rasterCandidate(const QString& key, QSize bound) {
+    const std::scoped_lock lock(mutex);
+    for (auto it = entries.begin(); it != entries.end(); ++it) {
+      const auto& entry = *it;
       if (entry.key != key || !entry.raster) {
         continue;
       }
       const auto needed = ThumbnailService::requiredSize(entry.raster->source_size, bound);
       if (entry.image.width() >= needed.width() && entry.image.height() >= needed.height()) {
-        return entry;
+        auto selected = entry;
+        entries.splice(entries.begin(), entries, it);
+        return selected;
       }
     }
     return std::nullopt;
   }
   void remove(const QString& key) {
+    const std::scoped_lock lock(mutex);
+    removeUnlocked(key);
+  }
+  void removeUnlocked(const QString& key) {
     for (auto it = entries.begin(); it != entries.end();) {
       if (it->key == key) {
         bytes -= it->image.sizeInBytes();
@@ -88,7 +102,8 @@ struct PreviewWorkerCache {
     if (image.isNull() || image.sizeInBytes() > budget) {
       return;
     }
-    remove(key);
+    const std::scoped_lock lock(mutex);
+    removeUnlocked(key);
     while (!entries.empty() && (entries.size() >= 2 || bytes + image.sizeInBytes() > budget)) {
       bytes -= entries.back().image.sizeInBytes();
       entries.pop_back();
@@ -192,7 +207,10 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
                           PreviewResult result, const std::shared_ptr<std::atomic_bool>& cancel, QSize requestedSize,
                           PreviewWorkerCache& cache, const std::function<void(const PreviewResult&)>& publish,
                           const std::function<void()>& beforeFullDecode, const ThumbnailService::StageCallback& stage,
-                          const ImageRuntimeOptions& options, const std::function<void()>& memoryCheckpoint) {
+                          const ImageRuntimeOptions& options, const std::function<void()>& memoryCheckpoint,
+                          HolonightImages::ReusableSession* session = nullptr,
+                          const std::function<bool(QFile&, const QString&, const PreviewResult&)>& defer = {},
+                          const HolonightImages::GenerationLease& generation = {}) {
   if (const auto candidate = cache.rasterCandidate(identity, requestedSize)) {
     if (memoryCheckpoint) {
       memoryCheckpoint();
@@ -201,7 +219,7 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
       return result;
     }
     if (unchangedSource(file, identity)) {
-      result.image = cache.lookup(identity, candidate->image.size());
+      result.image = candidate->image;
       result.source_pixel_size = candidate->raster->source_size;
       result.document_size = result.source_pixel_size;
       result.raster_outcome = HolonightImages::Outcome::Success;
@@ -223,51 +241,61 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
     }
     identity = sourceIdentity(current);
   }
+  if (defer && defer(file, identity, result)) {
+    result.deferred = true;
+    return result;
+  }
   std::optional<ThumbnailService::Tier> tier;
   QSize needed;
   bool decodedSource = false;
-  const auto reply =
-      HolonightImages::IsolatedClient(options.directory)
-          .sourceTransaction(
-              file, kPreviewImageLimits, *cancel,
-              [&](const HolonightImages::Inspection& inspection, HolonightImages::SourceTransaction& transaction) {
-                HolonightImages::DecodeResult selected;
-                selected.outcome = inspection.outcome;
-                if (inspection.outcome != HolonightImages::Outcome::Success || cancel->load()) {
-                  return selected;
-                }
-                needed = ThumbnailService::requiredSize(inspection.orientedSize, requestedSize);
-                tier = inspection.orientedSize.isValid() && !inspection.orientedSize.isEmpty()
-                           ? ThumbnailService::tierForSize(needed)
-                           : std::nullopt;
-                selected.image = cache.lookup(identity, needed);
-                if (selected.image.isNull() && tier) {
-                  auto cached = ThumbnailService::lookup(file, path, identity, *tier, needed, transaction, *cancel,
-                                                         stage, nativePath);
-                  if (cached) {
-                    selected.image = std::move(cached->image);
-                  }
-                }
-                if (!selected.image.isNull() || cancel->load()) {
-                  return selected;
-                }
-                if (beforeFullDecode) {
-                  beforeFullDecode();
-                }
-                if (cancel->load()) {
-                  return selected;
-                }
-                const auto bound = tier ? QSize(static_cast<int>(*tier), static_cast<int>(*tier)) : requestedSize;
-                if (stage) {
-                  stage(ThumbnailService::Stage::OriginalDecode);
-                }
-                selected = transaction.decodeSource({.limits = kPreviewImageLimits, .bound = bound});
-                decodedSource = true;
-                if (stage) {
-                  stage(ThumbnailService::Stage::OriginalDecoded);
-                }
-                return selected;
-              });
+  const HolonightImages::SourceCoordinator coordinate = [&](const HolonightImages::Inspection& inspection,
+                                                            HolonightImages::SourceTransaction& transaction) {
+    HolonightImages::DecodeResult selected;
+    selected.outcome = inspection.outcome;
+    if (inspection.outcome != HolonightImages::Outcome::Success || cancel->load()) {
+      return selected;
+    }
+    needed = ThumbnailService::requiredSize(inspection.orientedSize, requestedSize);
+    tier = inspection.orientedSize.isValid() && !inspection.orientedSize.isEmpty()
+               ? ThumbnailService::tierForSize(needed)
+               : std::nullopt;
+    selected.image = cache.lookup(identity, needed);
+    if (selected.image.isNull() && tier) {
+      auto cached =
+          ThumbnailService::lookup(file, path, identity, *tier, needed, transaction, *cancel, stage, nativePath);
+      if (cached) {
+        selected.image = std::move(cached->image);
+      }
+    }
+    if (!selected.image.isNull() || cancel->load()) {
+      return selected;
+    }
+    if (beforeFullDecode) {
+      beforeFullDecode();
+    }
+    if (cancel->load()) {
+      return selected;
+    }
+    const auto bound = tier ? QSize(static_cast<int>(*tier), static_cast<int>(*tier)) : requestedSize;
+    if (stage) {
+      stage(ThumbnailService::Stage::OriginalDecode);
+    }
+    selected = transaction.decodeSource({.limits = kPreviewImageLimits, .bound = bound});
+    decodedSource = true;
+    if (stage) {
+      stage(ThumbnailService::Stage::OriginalDecoded);
+    }
+    return selected;
+  };
+  const auto reply = [&]() -> HolonightImages::SessionResult<HolonightImages::DecodeResult> {
+    if (session) {
+      return session->sourceTransaction(file, kPreviewImageLimits, *cancel, coordinate);
+    }
+    auto client =
+        generation ? HolonightImages::IsolatedClient(generation) : HolonightImages::IsolatedClient(options.directory);
+    auto oneShot = client.sourceTransaction(file, kPreviewImageLimits, *cancel, coordinate);
+    return {.runtime = oneShot.runtime, .result = std::move(oneShot.result), .diagnostic = oneShot.diagnostic};
+  }();
   result.runtime = reply.runtime;
   result.diagnostic = reply.diagnostic;
   if (reply.runtime != HolonightImages::RuntimeStatus::Success || !reply.result) {
@@ -384,7 +412,8 @@ PreviewResult runPreviewJob(const QString& path, const QByteArray& nativePath, q
                             PreviewWorkerCache& cache, const std::function<void(const PreviewResult&)>& publish,
                             const std::function<void()>& beforeFullDecode, const ThumbnailService::StageCallback& stage,
                             const ImageRuntimeOptions& options, bool textOnly = false,
-                            const std::function<void()>& memoryCheckpoint = {}) {
+                            const std::function<void()>& memoryCheckpoint = {},
+                            const std::function<bool(QFile&, const QString&, const PreviewResult&)>& defer = {}) {
   PreviewResult result;
   result.generation = generation;
   if (cancel->load()) {
@@ -468,9 +497,56 @@ PreviewResult runPreviewJob(const QString& path, const QByteArray& nativePath, q
   }
   if (mime.name().startsWith(QStringLiteral("image/"))) {
     return decodeImage(file, path, nativePath, identity, result, cancel, requestedSize, cache, publish,
-                       beforeFullDecode, stage, options, memoryCheckpoint);
+                       beforeFullDecode, stage, options, memoryCheckpoint, nullptr, defer);
   }
   return result;
+}
+// fcntl's required third argument is a POSIX variadic API.
+int duplicateSource(int descriptor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+  return ::fcntl(descriptor, F_DUPFD_CLOEXEC, 3);
+}
+PreviewSessionPool::Job makeRasterJob(PreviewWorkerCache& cache, const QString& path, const QByteArray& nativePath,
+                                      const std::shared_ptr<std::atomic_bool>& cancel, QSize size,
+                                      const std::function<void(const PreviewResult&)>& publish,
+                                      const std::function<void()>& beforeFull,
+                                      const ThumbnailService::StageCallback& stage, const ImageRuntimeOptions& options,
+                                      const QString& identity, const PreviewResult& initial,
+                                      const std::shared_ptr<int>& transferred) {
+  return [&cache, path, nativePath, cancel, size, publish, beforeFull, stage, options, identity, initial, transferred](
+             HolonightImages::ReusableSession* session, const HolonightImages::GenerationLease& lease) {
+    QFile file(path);
+    const int received = duplicateSource(*transferred);
+    if (received < 0 || !file.open(received, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+      if (received >= 0) {
+        ::close(received);
+      }
+      auto failed = initial;
+      failed.raster_outcome = HolonightImages::Outcome::IoFailure;
+      if (!cancel->load()) {
+        publish(failed);
+      }
+      return HolonightImages::RuntimeStatus::Success;
+    }
+    if (!unchangedSource(file, identity)) {
+      auto failed = initial;
+      failed.raster_outcome = HolonightImages::Outcome::IoFailure;
+      if (!cancel->load()) {
+        publish(failed);
+      }
+      return HolonightImages::RuntimeStatus::Success;
+    }
+    auto result = decodeImage(file, path, nativePath, identity, initial, cancel, size, cache, publish, beforeFull,
+                              stage, options, {}, session, {}, lease);
+    if (result.runtime != HolonightImages::RuntimeStatus::Success &&
+        result.runtime != HolonightImages::RuntimeStatus::Cancelled) {
+      qWarning() << "Preview runtime failure" << static_cast<int>(result.runtime) << result.diagnostic;
+    }
+    if (!cancel->load()) {
+      publish(result);
+    }
+    return result.runtime;
+  };
 }
 }  // namespace
 
@@ -512,6 +588,14 @@ PreviewService::PreviewService(ImageRuntimeOptions options, QObject* parent)
     }
   });
   thread_.start();
+  const auto directory = runtime_options_.directory;
+  QMetaObject::invokeMethod(
+      worker_,
+      [this, directory] {
+        sessions_ = std::make_unique<PreviewSessionPool>(directory, worker_);
+        sessions_->setReadinessObserver([this](bool ready) { runtime_ready_for_test_.store(ready); });
+      },
+      Qt::QueuedConnection);
 }
 
 PreviewService::~PreviewService() {
@@ -519,8 +603,18 @@ PreviewService::~PreviewService() {
   if (cancellation_) {
     cancellation_->store(true);
   }
-  thread_.quit();
-  thread_.wait();
+  if (thread_.isRunning()) {
+    QMetaObject::invokeMethod(
+        worker_,
+        [this] {
+          if (sessions_) {
+            sessions_->shutdown();
+          }
+        },
+        Qt::BlockingQueuedConnection);
+    thread_.quit();
+    thread_.wait();
+  }
 }
 
 void PreviewService::setTarget(const QString& path, bool isDir, qint64 size, const QDateTime& modified, quint32 mode,
@@ -704,7 +798,29 @@ void PreviewService::shutdown() {
   if (cancellation_) {
     cancellation_->store(true);
   }
-  thread_.quit();
+  QMetaObject::invokeMethod(
+      worker_,
+      [this] {
+        if (sessions_) {
+          sessions_->shutdown();
+        }
+        QThread::currentThread()->quit();
+      },
+      Qt::QueuedConnection);
+}
+
+void PreviewService::refreshRuntime() {
+  if (stopping_) {
+    return;
+  }
+  QMetaObject::invokeMethod(
+      worker_,
+      [this] {
+        if (sessions_) {
+          sessions_->refresh();
+        }
+      },
+      Qt::QueuedConnection);
 }
 
 void PreviewService::dispatch() {
@@ -748,13 +864,39 @@ void PreviewService::startJob() {
         if (!cancel->load() && beforeDispatch) {
           beforeDispatch();
         }
+        const auto defer = [this, path, nativePath, cancel, size, publish, beforeFull, stage, options](
+                               QFile& source, const QString& identity, const PreviewResult& initial) {
+          const int descriptor = duplicateSource(source.handle());
+          if (descriptor < 0) {
+            return false;
+          }
+          const auto transferred = std::shared_ptr<int>(new int(descriptor), [](const int* value) {
+            ::close(*value);
+            delete value;
+          });
+          const auto failure = [publish, initial, cancel](HolonightImages::RuntimeStatus status,
+                                                          const QString& diagnostic) mutable {
+            if (cancel->load()) {
+              return;
+            }
+            auto failed = initial;
+            failed.runtime = status;
+            failed.diagnostic = diagnostic;
+            qWarning() << "Preview runtime failure" << static_cast<int>(status) << diagnostic;
+            publish(failed);
+          };
+          sessions_->submit(makeRasterJob(*cache_, path, nativePath, cancel, size, publish, beforeFull, stage, options,
+                                          identity, initial, transferred),
+                            cancel, failure);
+          return true;
+        };
         auto result = runPreviewJob(path, nativePath, generation, cancel, size, *cache_, publish, beforeFull, stage,
-                                    options, false, memoryCheckpoint);
+                                    options, false, memoryCheckpoint, defer);
         if (result.runtime != HolonightImages::RuntimeStatus::Success &&
             result.runtime != HolonightImages::RuntimeStatus::Cancelled) {
           qWarning() << "Preview runtime failure" << static_cast<int>(result.runtime) << result.diagnostic;
         }
-        if (!cancel->load()) {
+        if (!cancel->load() && !result.deferred) {
           publish(result);
         }
         QMetaObject::invokeMethod(
