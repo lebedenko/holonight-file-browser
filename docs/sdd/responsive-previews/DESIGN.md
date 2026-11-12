@@ -117,3 +117,15 @@ genuine-startup p95 regresses at most 8.171%. The strict comparison remains
 incomplete because the frozen baseline has eight cleanup-flagged navigation
 entries and 17 missing placeholders. Its partial quantiles are not qualified
 reference results. The umbrella assessment preserves the complete evidence.
+
+
+A subsequent corrected-reference comparison collected all observations but failed
+large-PNG startup qualification. A fresh bounded initial-standby-deferral experiment
+then removed correlated standby overlap (400/400 C jobs versus 0/400 D jobs), but
+its single uninstrumented pilot failed the required large-PNG p95 improvement:
+pixels/metadata worsened by 3.878/3.881 ms (+2.64%) against contemporaneous C.
+All startup allowances against A-fixed passed. The scheduler described above
+remains unchanged; no production deferral or new full qualification followed.
+The [timing report](../../../../docs/initiatives/preview-timing-comparison.md#fresh-bounded-scheduling-comparison-unsuccessful-pilot)
+links the complete valid observations, unchanged-input checks and verified cleanup.
+Earlier failed evidence remains intact; qualification remains failed.
