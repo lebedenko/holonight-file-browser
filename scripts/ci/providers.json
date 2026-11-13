@@ -1,11 +1,11 @@
 [
   {
     "name": "holonight-config",
-    "revision": "b115286c67561bcb34c8009da5098e3cb215f874"
+    "revision": "39dd3b68947b6be19364fdf147aaf49f5b95c9c2"
   },
   {
     "name": "holonight-system-services",
-    "revision": "cb7a1dd88b5327daff5cd08a90171b9386f2cb1a",
+    "revision": "4ebc39cc3709133c3f3b1bed59ba3b150d6846a3",
     "options": [
       "-DBUILD_AUDIO=OFF",
       "-DBUILD_STORAGE=ON"
@@ -13,18 +13,18 @@
   },
   {
     "name": "holonight-qt",
-    "revision": "c3c0911615b72104d19cdfe48a7a2f50a0edd81f"
+    "revision": "1a1c106b042ca079bd54ad75498407e2923bc61a"
   },
   {
     "name": "holonight-images",
-    "revision": "7320da6c69ff95a671defee5ddc34c3df379ba4b"
+    "revision": "928f281586686a67584d610cd3b2a1468536c185"
   },
   {
     "name": "holonight-thumbnails",
-    "revision": "6953a93b6e93b3663284b8e3a4d8c9a3e5addcc9"
+    "revision": "945aedf4256c0d2e6c358c2fa3cee8e49316c651"
   },
   {
     "name": "holonight-search",
-    "revision": "0dee7e146c4300f6af81da0337e94b4cc3d7dbc4"
+    "revision": "d17a6704edf8469136ffcc92db4a958f04d30cea"
   }
 ]
