@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
+python3 scripts/test-quality.py
 task test
 python3 scripts/quality.py format-check
 python3 scripts/quality.py tidy --build build/dev

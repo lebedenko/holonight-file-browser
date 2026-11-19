@@ -19,3 +19,8 @@ consumer commits that reference them. Update umbrella pins per coherent mileston
 Use C++23, Qt 6.11+, shared HoloNight controls and tokens, translated UI strings,
 and native decorations. Preserve GPL-3.0-or-later metadata and third-party attribution.
 System installation/removal belongs to the umbrella; standalone DESTDIR staging remains supported.
+
+Clang-tidy translates GCC-only direct-access flags in temporary analysis databases;
+no manual database edits are needed. See the umbrella
+[translation contract](../docs/initiatives/clang-tidy-compatibility.md) when working
+in the coordinated checkout. Standalone helper regressions: `python3 scripts/test-quality.py`.

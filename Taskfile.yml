@@ -17,3 +17,7 @@ tasks:
   check:integration:
     cmds:
     - python3 scripts/ci/container.py integration {{.CLI_ARGS}}
+  tidy:
+    desc: Analyze native compilation databases
+    cmds:
+    - python3 scripts/quality.py tidy --build build/dev
