@@ -30,10 +30,12 @@ inline void configureDecodeLimits() {
   QImageReader::setAllocationLimit(256);
 }
 
-inline constexpr HolonightImages::Limits kRasterLimits{.inputBytes = kFileLimitBytes,
-                                                       .sourcePixels = kImageLimitPixels,
-                                                       .sourceExtent = 32768,
-                                                       .decodedBytes = kImageLimitBytes,
-                                                       .metadataBytes = 1024 * 1024,
-                                                       .tiffMetadataBytes = 64 * 1024 * 1024,
-                                                       .metadataRecords = 4096};
+inline constexpr HolonightImages::Limits kRasterLimits{
+    .inputBytes = kFileLimitBytes,
+    .sourcePixels = kImageLimitPixels,
+    .sourceExtent = 32768,
+    .decodedBytes = kImageLimitBytes,
+    .metadataBytes = 1024 * 1024,
+    .tiffMetadataBytes = 64 * 1024 * 1024,
+    .metadataRecords = 4096,
+};

@@ -56,11 +56,15 @@ TEST(BrowserSearch, RootDirectoryCachePreservesNativeIdentity) {
   const QByteArray path = "/" + relative;
   const std::atomic_bool cancelled{false};
   BrowserPathIndexStore store(cache, "/", {});
-  store.append({{.path = QFile::decodeName(path),
-                 .relative_path = QFile::decodeName(relative),
-                 .directory = false,
-                 .native_path = path,
-                 .native_relative_path = relative}});
+  store.append({
+      {
+          .path = QFile::decodeName(path),
+          .relative_path = QFile::decodeName(relative),
+          .directory = false,
+          .native_path = path,
+          .native_relative_path = relative,
+      },
+  });
   ASSERT_TRUE(store.commit(QDateTime::currentMSecsSinceEpoch(), cancelled));
   QVector<PathCandidate> restored;
   qint64 completed = 0;

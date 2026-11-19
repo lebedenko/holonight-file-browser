@@ -58,12 +58,14 @@ HolonightThumbnails::Request cacheRequest(const QByteArray& path, const struct s
                                           HolonightThumbnails::Kind kind) {
   const qint64 milliseconds =
       (static_cast<qint64>(metadata.st_mtim.tv_sec) * 1000) + (metadata.st_mtim.tv_nsec / 1000000);
-  return {.uri = HolonightFileBrowser::localUrl(path),
-          .modified = QDateTime::fromMSecsSinceEpoch(milliseconds),
-          .size = metadata.st_size,
-          .required = required,
-          .kind = kind,
-          .revision = {}};
+  return {
+      .uri = HolonightFileBrowser::localUrl(path),
+      .modified = QDateTime::fromMSecsSinceEpoch(milliseconds),
+      .size = metadata.st_size,
+      .required = required,
+      .kind = kind,
+      .revision = {},
+  };
 }
 
 bool sourceMatches(const QByteArray& path, const struct stat& opened) {

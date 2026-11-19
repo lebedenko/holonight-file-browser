@@ -137,11 +137,13 @@ bool BrowserPathIndexStore::load(const QString& path, const QString& root, const
     }
     hash.addData(bytes);
     hash.addData(type);
-    batch.append({.path = QDir(root).filePath(relative),
-                  .relative_path = relative,
-                  .directory = type[0] == 1,
-                  .native_path = nativeRoot + bytes,
-                  .native_relative_path = bytes});
+    batch.append({
+        .path = QDir(root).filePath(relative),
+        .relative_path = relative,
+        .directory = type[0] == 1,
+        .native_path = nativeRoot + bytes,
+        .native_relative_path = bytes,
+    });
     if (batch.size() == 256) {
       batchReady(std::move(batch));
       batch.clear();

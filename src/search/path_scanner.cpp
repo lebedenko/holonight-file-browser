@@ -64,11 +64,13 @@ void scanFolder(const QByteArray& folder, const QString& root, const QByteArray&
       continue;
     }
     const auto relative = nativePath.mid(prefix.size());
-    batch.append({.path = path,
-                  .relative_path = QFile::decodeName(relative),
-                  .directory = isDirectory,
-                  .native_path = nativePath,
-                  .native_relative_path = relative});
+    batch.append({
+        .path = path,
+        .relative_path = QFile::decodeName(relative),
+        .directory = isDirectory,
+        .native_path = nativePath,
+        .native_relative_path = relative,
+    });
     if (isDirectory) {
       pending.append(nativePath);
     }

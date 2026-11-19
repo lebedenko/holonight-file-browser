@@ -96,10 +96,12 @@ class ThumbnailResponse : public QQuickImageResponse {
       finishLater();
       return;
     }
-    key_ = {.path = QFile::decodeName(parsed.path),
-            .box_pixels = parsed.box_pixels,
-            .generation = parsed.generation,
-            .native_path = parsed.path};
+    key_ = {
+        .path = QFile::decodeName(parsed.path),
+        .box_pixels = parsed.box_pixels,
+        .generation = parsed.generation,
+        .native_path = parsed.path,
+    };
     if (auto hit = owner_.cachedImage(key_)) {
       image_ = std::move(*hit);
       finishLater();

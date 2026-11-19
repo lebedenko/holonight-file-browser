@@ -65,30 +65,36 @@ class PoolLifecycle : public testing::Test {
   std::unique_ptr<PreviewSessionPool> pool;
   // NOLINTEND(cppcoreguidelines-non-private-member-variables-in-classes)
   PreviewSessionPool::Operations operations() {
-    return {.now = [&] { return time.load(); },
-            .prepare =
-                [&](size_t, const std::atomic_bool&) {
-                  ++launches;
-                  if (fail_prepare.load()) {
-                    return HolonightImages::SessionLifecycleResult{
-                        .runtime = HolonightImages::RuntimeStatus::Unavailable,
-                        .diagnostic = "injected startup failure"};
-                  }
-                  EXPECT_LE(++live, 2);
-                  return HolonightImages::SessionLifecycleResult{.runtime = HolonightImages::RuntimeStatus::Success,
-                                                                 .diagnostic = {}};
-                },
-            .retire =
-                [&](size_t) {
-                  ++cleanups;
-                  --live;
-                  return HolonightImages::SessionLifecycleResult{
-                      .runtime = fail_cleanup.load() ? HolonightImages::RuntimeStatus::CleanupFailure
-                                                     : HolonightImages::RuntimeStatus::Success,
-                      .diagnostic = {}};
-                },
-            .ready = [](size_t) { return true; },
-            .memory = [&](size_t) { return memory.load(); }};
+    return {
+        .now = [&] { return time.load(); },
+        .prepare =
+            [&](size_t, const std::atomic_bool&) {
+              ++launches;
+              if (fail_prepare.load()) {
+                return HolonightImages::SessionLifecycleResult{
+                    .runtime = HolonightImages::RuntimeStatus::Unavailable,
+                    .diagnostic = "injected startup failure",
+                };
+              }
+              EXPECT_LE(++live, 2);
+              return HolonightImages::SessionLifecycleResult{
+                  .runtime = HolonightImages::RuntimeStatus::Success,
+                  .diagnostic = {},
+              };
+            },
+        .retire =
+            [&](size_t) {
+              ++cleanups;
+              --live;
+              return HolonightImages::SessionLifecycleResult{
+                  .runtime = fail_cleanup.load() ? HolonightImages::RuntimeStatus::CleanupFailure
+                                                 : HolonightImages::RuntimeStatus::Success,
+                  .diagnostic = {},
+              };
+            },
+        .ready = [](size_t) { return true; },
+        .memory = [&](size_t) { return memory.load(); },
+    };
   }
   void start() { pool = std::make_unique<PreviewSessionPool>("/fake-managed-runtime", &control, operations()); }
   void TearDown() override {

@@ -287,7 +287,7 @@ PreviewResult decodeImage(QFile& file, const QString& path, const QByteArray& na
     }
     return selected;
   };
-  const auto reply = [&]() -> HolonightImages::SessionResult<HolonightImages::DecodeResult> {
+  const auto reply = [&] -> HolonightImages::SessionResult<HolonightImages::DecodeResult> {
     if (session) {
       return session->sourceTransaction(file, kPreviewImageLimits, *cancel, coordinate);
     }
@@ -420,8 +420,10 @@ PreviewResult runPreviewJob(const QString& path, const QByteArray& nativePath, q
     return result;
   }
   if (!HolonightFileBrowser::absoluteNativePath(nativePath)) {
-    result.error = {.kind = PreviewService::PreviewErrorKind::IoFailure,
-                    .message = QObject::tr("Preview path must be an absolute local path")};
+    result.error = {
+        .kind = PreviewService::PreviewErrorKind::IoFailure,
+        .message = QObject::tr("Preview path must be an absolute local path"),
+    };
     return result;
   }
   // In-memory glob match only: no file I/O.
@@ -1060,8 +1062,10 @@ PreviewService::PreviewError PreviewService::rasterError(HolonightImages::Outcom
     case Outcome::Cancelled:
       return {};
     case Outcome::Unsupported:
-      return {.kind = PreviewErrorKind::Unsupported,
-              .message = tr("The image format or color profile is not supported.")};
+      return {
+          .kind = PreviewErrorKind::Unsupported,
+          .message = tr("The image format or color profile is not supported."),
+      };
     case Outcome::Damaged:
       return {.kind = PreviewErrorKind::DecodeFailed, .message = tr("The image is damaged or could not be decoded.")};
     case Outcome::ResourceLimit:

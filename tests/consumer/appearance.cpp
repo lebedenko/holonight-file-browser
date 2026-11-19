@@ -73,12 +73,14 @@ int checkPixels(QObject& object, const QImage& image, const QImage& previous) {
 }
 int checkTransitions(QObject& object, QQuickWindow& window, const QString& path) {
   QImage previous;
-  for (const auto& selection : {qMakePair(QByteArray("holonight-dark"), QByteArray("blue")),
-                                qMakePair(QByteArray("holonight-mocha"), QByteArray("default")),
-                                qMakePair(QByteArray("holonight-mocha"), QByteArray("violet")),
-                                qMakePair(QByteArray("holonight-light"), QByteArray("blue")),
-                                qMakePair(QByteArray("holonight-dark"), QByteArray("blue")),
-                                qMakePair(QByteArray("holonight-mocha"), QByteArray("violet"))}) {
+  for (const auto& selection : {
+           qMakePair(QByteArray("holonight-dark"), QByteArray("blue")),
+           qMakePair(QByteArray("holonight-mocha"), QByteArray("default")),
+           qMakePair(QByteArray("holonight-mocha"), QByteArray("violet")),
+           qMakePair(QByteArray("holonight-light"), QByteArray("blue")),
+           qMakePair(QByteArray("holonight-dark"), QByteArray("blue")),
+           qMakePair(QByteArray("holonight-mocha"), QByteArray("violet")),
+       }) {
     const auto revision = object.property("revision").toInt();
     if (!write(path, appearance(selection.first, selection.second))) {
       return 4;

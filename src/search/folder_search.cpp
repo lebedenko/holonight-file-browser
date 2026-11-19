@@ -9,9 +9,11 @@ QSet<QByteArray> matchFolder(const QList<FolderSearchEntry>& records, const QStr
     if (cancelled.load()) {
       return {};
     }
-    values.append({.id = QString::fromLatin1(entry.path.toHex()),
-                   .fields = {{.name = "name", .text = entry.name, .weight = 1}},
-                   .boost = 0});
+    values.append({
+        .id = QString::fromLatin1(entry.path.toHex()),
+        .fields = {{.name = "name", .text = entry.name, .weight = 1}},
+        .boost = 0,
+    });
   }
   index.replace("folder", std::move(values));
   HolonightSearch::Options options;
